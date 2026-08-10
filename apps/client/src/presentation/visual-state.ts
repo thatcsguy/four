@@ -13,6 +13,9 @@ export interface FeetPosition {
 
 export interface PlayerRenderState {
   readonly id: string;
+  readonly name: string;
+  readonly health: number;
+  readonly maxHealth: number;
   readonly position: FeetPosition;
   readonly facing: number;
   readonly grounded: boolean;

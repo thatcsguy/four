@@ -2,6 +2,7 @@ import { MOVEMENT_CONSTANTS, PRESENTATION_CONSTANTS } from "@four/shared";
 import * as THREE from "three";
 
 import type { PlayerRenderState } from "./visual-state.js";
+import { Nameplate } from "./nameplate.js";
 
 const SHADOW_COLOR = 0x07111f;
 
@@ -31,6 +32,7 @@ export class CharacterVisual {
   private readonly limbs: LimbSet;
   private readonly localMarker: THREE.Mesh;
   private readonly shadow: THREE.Mesh;
+  private readonly nameplate: Nameplate;
   private phase = 0;
   private moving = false;
 
@@ -100,6 +102,10 @@ export class CharacterVisual {
     this.localMarker.position.y = 0.024;
     this.localMarker.visible = isLocal;
     this.root.add(this.localMarker);
+
+    this.nameplate = new Nameplate("Player", 100, 100);
+    this.nameplate.sprite.position.y = 2.35;
+    this.root.add(this.nameplate.sprite);
   }
 
   setState(state: PlayerRenderState): void {
@@ -108,6 +114,7 @@ export class CharacterVisual {
     this.moving = state.moving;
     this.shadow.visible = state.grounded;
     this.localMarker.visible = state.isLocal && state.grounded;
+    this.nameplate.set(state.name, state.health, state.maxHealth);
   }
 
   update(deltaSeconds: number): void {
@@ -129,6 +136,7 @@ export class CharacterVisual {
   }
 
   dispose(): void {
+    this.nameplate.dispose();
     this.root.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) {
         return;

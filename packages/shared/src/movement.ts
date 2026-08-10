@@ -5,6 +5,9 @@ export type SimulatedPlayerState = AuthoritativePlayerState;
 
 export interface PlayerSpawn {
   playerId: string;
+  displayName?: string;
+  health?: number;
+  maxHealth?: number;
   position?: Readonly<Vector3>;
   facingAngle?: number;
 }
@@ -56,6 +59,9 @@ export function createInitialPlayerState(spawn: Readonly<PlayerSpawn>): Simulate
 
   return {
     playerId: spawn.playerId,
+    displayName: spawn.displayName ?? "Player",
+    health: spawn.health ?? 100,
+    maxHealth: spawn.maxHealth ?? 100,
     position: {
       x: boundedPosition.x,
       y: MOVEMENT_CONSTANTS.groundHeight,

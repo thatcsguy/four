@@ -63,6 +63,9 @@ export const controlStateSchema = z.object({
 
 export const authoritativePlayerStateSchema = z.object({
   playerId: identifierSchema,
+  displayName: z.string().min(1).max(24),
+  health: finiteNumberSchema.nonnegative(),
+  maxHealth: finiteNumberSchema.positive(),
   position: vector3Schema,
   grounded: z.boolean(),
   verticalVelocity: finiteNumberSchema,
@@ -72,7 +75,10 @@ export const authoritativePlayerStateSchema = z.object({
   control: controlStateSchema,
   stateRevision: safeNonNegativeIntegerSchema,
   lastProcessedInputSequence: safeNonNegativeIntegerSchema,
-}).strict();
+}).strict().refine((state) => state.health <= state.maxHealth, {
+  message: "health must not exceed maxHealth",
+  path: ["health"],
+});
 
 const versionSchema = z.literal(PROTOCOL_VERSION);
 const epochSchema = identifierSchema;

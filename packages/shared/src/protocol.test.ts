@@ -19,6 +19,9 @@ import {
 
 const player: AuthoritativePlayerState = {
   playerId: "player-1",
+  displayName: "Nova",
+  health: 100,
+  maxHealth: 100,
   position: { x: 1, y: 0, z: -2 },
   grounded: true,
   verticalVelocity: 0,
@@ -124,7 +127,7 @@ describe("network boundary validation", () => {
   });
 
   it("rejects wrong versions and unexpected fields", () => {
-    expect(decodeClientMessage(JSON.stringify({ ...validInput, protocolVersion: 2 })).success).toBe(false);
+    expect(decodeClientMessage(JSON.stringify({ ...validInput, protocolVersion: 999 })).success).toBe(false);
     expect(decodeClientMessage(JSON.stringify({ ...validInput, position: { x: 10 } })).success).toBe(false);
   });
 
@@ -151,9 +154,12 @@ it("serializes every future-affecting player movement field", () => {
   expect(Object.keys(parsed).sort()).toEqual([
     "airborneVelocity",
     "control",
+    "displayName",
     "facingAngle",
     "grounded",
+    "health",
     "lastProcessedInputSequence",
+    "maxHealth",
     "playerId",
     "position",
     "speedModifier",

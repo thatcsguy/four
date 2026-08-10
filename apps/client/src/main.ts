@@ -46,10 +46,10 @@ if (root) {
 
   if (fixture === "players") {
     const samples: readonly PlayerRenderState[] = [
-      { id: "local", position: { x: -3, y: 0, z: 2 }, facing: 0, grounded: true, moving: true, isLocal: true },
-      { id: "remote-a", position: { x: 0, y: 0, z: 2 }, facing: Math.PI / 2, grounded: true, moving: true, isLocal: false },
-      { id: "remote-b", position: { x: 3, y: 1.6, z: 2 }, facing: Math.PI, grounded: false, moving: false, isLocal: false },
-      { id: "remote-c", position: { x: 0, y: 0, z: -2 }, facing: -Math.PI / 2, grounded: true, moving: false, isLocal: false },
+      { id: "local", name: "Nova", health: 100, maxHealth: 100, position: { x: -4, y: 0, z: 3 }, facing: 0, grounded: true, moving: true, isLocal: true },
+      { id: "remote-a", name: "Moss", health: 82, maxHealth: 100, position: { x: 0, y: 0, z: 5 }, facing: Math.PI / 2, grounded: true, moving: true, isLocal: false },
+      { id: "remote-b", name: "Pip", health: 46, maxHealth: 100, position: { x: 4, y: 1.6, z: 3 }, facing: Math.PI, grounded: false, moving: false, isLocal: false },
+      { id: "remote-c", name: "Rune", health: 25, maxHealth: 100, position: { x: 0, y: 0, z: -5 }, facing: -Math.PI / 2, grounded: true, moving: false, isLocal: false },
     ];
     for (const sample of samples) {
       view.upsertPlayer(sample);
@@ -74,6 +74,9 @@ if (root) {
       followedFeet = { ...player.position };
       view.upsertPlayer({
         id: player.playerId,
+        name: player.displayName,
+        health: player.health,
+        maxHealth: player.maxHealth,
         position: player.position,
         facing: player.facingAngle,
         grounded: player.grounded,
@@ -137,6 +140,9 @@ if (root) {
         followedFeet = { ...rendered.position };
         view.upsertPlayer({
           id: rendered.playerId,
+          name: rendered.displayName,
+          health: rendered.health,
+          maxHealth: rendered.maxHealth,
           position: rendered.position,
           facing: rendered.facingAngle,
           grounded: rendered.grounded,
@@ -150,6 +156,9 @@ if (root) {
         presentRemoteIds.add(remoteId);
         view.upsertPlayer({
           id: remoteId,
+          name: remote.state.displayName,
+          health: remote.state.health,
+          maxHealth: remote.state.maxHealth,
           position: remote.state.position,
           facing: remote.state.facingAngle,
           grounded: remote.state.grounded,

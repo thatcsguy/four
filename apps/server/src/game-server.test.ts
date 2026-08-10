@@ -21,7 +21,7 @@ import {
   MAX_MESSAGE_BYTES,
   MISSING_INPUT_GRACE_TICKS,
 } from "./config.js";
-import { GameServer, type ServerLogger } from "./game-server.js";
+import { GameServer, PLAYER_NAMES, type ServerLogger } from "./game-server.js";
 
 interface TestClient {
   socket: WebSocket;
@@ -133,6 +133,9 @@ describe("authoritative WebSocket server", () => {
     expect(welcomes.at(-1)?.baseline.players).toHaveLength(MAX_ACTIVE_PLAYERS);
     expect(new Set(welcomes.at(-1)?.baseline.players.map((player) => `${player.position.x},${player.position.z}`)).size)
       .toBe(MAX_ACTIVE_PLAYERS);
+    const spawnedPlayers = welcomes.at(-1)?.baseline.players ?? [];
+    expect(new Set(spawnedPlayers.map((player) => player.displayName))).toEqual(new Set(PLAYER_NAMES));
+    expect(spawnedPlayers.every((player) => player.health === 100 && player.maxHealth === 100)).toBe(true);
 
     const rejected = await connect();
     const full = await rejected.next((message) => message.type === "server_full");

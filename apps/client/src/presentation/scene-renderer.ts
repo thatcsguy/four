@@ -3,6 +3,7 @@ import * as THREE from "three";
 
 import { createArena } from "./arena.js";
 import { CharacterVisual } from "./character-visual.js";
+import { BossVisual } from "./boss-visual.js";
 import { StatusView, type StatusContent } from "./status-view.js";
 import {
   playerColorForIndex,
@@ -53,6 +54,8 @@ export function createSceneRenderer(root: HTMLElement): SceneRenderer {
   scene.background = new THREE.Color(0x07111f);
   scene.fog = new THREE.Fog(0x07111f, 34, 74);
   scene.add(createArena());
+  const boss = new BossVisual();
+  scene.add(boss.root);
 
   const camera = new THREE.PerspectiveCamera(
     CAMERA_CONSTANTS.verticalFovDegrees,
@@ -111,6 +114,7 @@ export function createSceneRenderer(root: HTMLElement): SceneRenderer {
     for (const visual of players.values()) {
       visual.update(deltaSeconds);
     }
+    boss.update(deltaSeconds);
     renderer.render(scene, camera);
   }
 
@@ -202,6 +206,7 @@ export function createSceneRenderer(root: HTMLElement): SceneRenderer {
       for (const visual of players.values()) {
         visual.dispose();
       }
+      boss.dispose();
       players.clear();
       colorIndices.clear();
       frameListeners.clear();

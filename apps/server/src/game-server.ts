@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
@@ -35,6 +35,8 @@ import {
 } from "./config.js";
 
 const NEUTRAL_INPUT: MovementInput = Object.freeze({ moveX: 0, moveZ: 0, jump: false });
+
+export const PLAYER_NAMES = ["Nova", "Moss", "Pip", "Rune"] as const;
 
 export interface ServerLogger {
   info(message: string): void;
@@ -230,6 +232,7 @@ export class GameServer {
     const spawnIndex = this.claimSpawn();
     const playerId = randomUUID();
     const epoch = randomUUID();
+    const displayName = this.choosePlayerName();
     const spawn = SPAWN_POINTS[spawnIndex];
     if (spawn === undefined) throw new Error("Claimed spawn index is out of range");
     const player: PlayerConnection = {
@@ -237,7 +240,7 @@ export class GameServer {
       playerId,
       epoch,
       spawnIndex,
-      state: createInitialPlayerState({ playerId, position: spawn }),
+      state: createInitialPlayerState({ playerId, displayName, position: spawn }),
       inputQueue: [],
       lastReceivedSequence: 0,
       lastAppliedInput: NEUTRAL_INPUT,
@@ -264,7 +267,13 @@ export class GameServer {
         players: this.playerStates(),
       },
     });
-    this.options.logger.info(`connected player=${playerId} epoch=${epoch} spawn=${spawnIndex}`);
+    this.options.logger.info(`connected player=${playerId} name=${displayName} epoch=${epoch} spawn=${spawnIndex}`);
+  }
+
+  private choosePlayerName(): string {
+    const assignedNames = new Set([...this.players.values()].map((player) => player.state.displayName));
+    const availableNames = PLAYER_NAMES.filter((name) => !assignedNames.has(name));
+    return availableNames[randomInt(availableNames.length)] ?? PLAYER_NAMES[0];
   }
 
   private handleMessage(player: PlayerConnection, data: RawData, isBinary: boolean): void {
