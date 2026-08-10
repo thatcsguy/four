@@ -1,0 +1,26 @@
+{
+  "name": "four",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "apps/client",
+    "apps/server",
+    "packages/shared"
+  ],
+  "scripts": {
+    "dev": "npm run build --workspace=@four/shared && concurrently -k -n client,server -c cyan,green \"npm run dev --workspace=@four/client\" \"npm run dev --workspace=@four/server\"",
+    "build": "npm run build --workspace=@four/shared && npm run build --workspace=@four/client && npm run build --workspace=@four/server",
+    "smoke": "npm run smoke --workspace=@four/server",
+    "smoke:production": "npm run build && npm run smoke:production --workspace=@four/server",
+    "start": "npm run start --workspace=@four/server",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0",
+    "typescript": "^5.9.2"
+  },
+  "overrides": {
+    "vite": "6.4.3"
+  }
+}
