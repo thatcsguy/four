@@ -321,6 +321,25 @@ describe("authoritative combat networking", () => {
     client.dispose();
   });
 
+  it("sends a class change and accepts the authoritative class state", () => {
+    const { client, transport } = setup();
+    expect(client.changeClass("samurai")).toBe(true);
+    const decoded = transport.sent.map((raw) => decodeClientMessage(raw))
+      .find((message) => message.success && message.data.type === "class_change");
+    expect(decoded).toMatchObject({
+      success: true,
+      data: { type: "class_change", classId: "samurai", epoch: "epoch-1" },
+    });
+    transport.receive({
+      type: "class_change_result",
+      protocolVersion: PROTOCOL_VERSION,
+      epoch: "epoch-1",
+      combat: { classId: "samurai", buffs: [], globalCooldownEndsAtTick: 0 },
+    });
+    expect(client.combatState().player?.classId).toBe("samurai");
+    client.dispose();
+  });
+
   it("does not send while disconnected, awaiting a baseline, hidden, or disposed", () => {
     const transport = new FakeTransport();
     const client = new PredictionClient({

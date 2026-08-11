@@ -149,4 +149,46 @@ describe("AbilityHotbar", () => {
     hotbar.setState(state(combat, { serverTick: 250 }));
     expect(buttons.map((button) => button.disabled)).toEqual([true, false, false, true]);
   });
+
+  it("shows Samurai stamps over slots 1-3 and unlocks the finisher with all three", () => {
+    const combat: PlayerCombatState = {
+      classId: "samurai",
+      buffs: [
+        { buffId: "samurai_stamp_1", stacks: 1 },
+        { buffId: "samurai_stamp_2", stacks: 1 },
+      ],
+      globalCooldownEndsAtTick: 0,
+    };
+    const { hotbar, buttons } = setup(state(combat));
+    expect(buttons.map((button) => button.dataset.stamp)).toEqual(["earned", "earned", "missing", "hidden"]);
+    expect(buttons.map((button) => button.disabled)).toEqual([false, false, false, true]);
+    expect(buttons[3]?.children[3]?.textContent).toBe("Requires 3 stamps");
+
+    hotbar.setState(state({
+      ...combat,
+      buffs: [...combat.buffs, { buffId: "samurai_stamp_3", stacks: 1 }],
+    }));
+    expect(buttons[3]?.disabled).toBe(false);
+    expect(buttons[3]?.dataset.procReady).toBe("true");
+  });
+
+  it("marks only unpressed Samurai combo steps as needed", () => {
+    const combat = (buffIds: readonly string[]): PlayerCombatState => ({
+      classId: "samurai",
+      buffs: buffIds.map((buffId) => ({ buffId, stacks: 1 })),
+      globalCooldownEndsAtTick: 0,
+    });
+    const { hotbar, buttons } = setup(state(combat([])));
+    expect(buttons.map((button) => button.dataset.comboNeeded)).toEqual(["false", "false", "false", "false"]);
+
+    hotbar.setState(state(combat(["samurai_combo_1"])));
+    expect(buttons.map((button) => button.dataset.comboNeeded)).toEqual(["false", "true", "true", "false"]);
+    expect(buttons[1]?.attributes.get("aria-label")).toContain("needed to complete combo");
+
+    hotbar.setState(state(combat(["samurai_combo_1", "samurai_combo_2"])));
+    expect(buttons.map((button) => button.dataset.comboNeeded)).toEqual(["false", "false", "true", "false"]);
+
+    hotbar.setState(state(combat(["samurai_stamp_3"])));
+    expect(buttons.map((button) => button.dataset.comboNeeded)).toEqual(["false", "false", "false", "false"]);
+  });
 });

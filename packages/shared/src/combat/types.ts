@@ -37,7 +37,11 @@ export interface AbilityDefinition {
   readonly slot: AbilitySlot;
   readonly name: string;
   readonly damage: number;
+  readonly delivery?: "projectile" | "melee";
+  /** Maximum reach in meters from the attacker to the target's collision boundary. */
+  readonly maxRange?: number;
   readonly requiredBuffId?: ReadinessBuffId;
+  readonly requiredBuffIds?: readonly ReadinessBuffId[];
   readonly guaranteedBuffId?: ReadinessBuffId;
   readonly procBuffId?: ReadinessBuffId;
   readonly procChance?: number;
@@ -47,8 +51,13 @@ export interface AbilityDefinition {
 
 export interface PlayerClassDefinition {
   readonly id: PlayerClassId;
+  readonly name: string;
   readonly abilitiesBySlot: Readonly<Partial<Record<AbilitySlot, AbilityDefinition>>>;
   createInitialState(): PlayerCombatState;
+  resolveAcceptedAbility?(
+    combatState: Readonly<PlayerCombatState>,
+    ability: Readonly<AbilityDefinition>,
+  ): PlayerCombatState;
 }
 
 export interface BossDefinition {

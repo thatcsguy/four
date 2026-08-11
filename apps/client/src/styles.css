@@ -146,6 +146,62 @@ body {
   transform: translateX(-50%);
 }
 
+.class-switcher {
+  position: fixed;
+  z-index: 5;
+  top: max(1rem, env(safe-area-inset-top));
+  right: max(1rem, env(safe-area-inset-right));
+  display: grid;
+  justify-items: end;
+  gap: 0.35rem;
+}
+
+.class-switcher button {
+  border: 1px solid rgb(125 211 252 / 52%);
+  border-radius: 0.5rem;
+  background: rgb(3 10 20 / 92%);
+  color: #e9f6ff;
+  font: 700 0.75rem/1.2 inherit;
+  cursor: pointer;
+}
+
+.class-switcher button:disabled {
+  color: #8293a7;
+  cursor: not-allowed;
+}
+
+.class-switcher__toggle {
+  padding: 0.6rem 0.8rem;
+}
+
+.class-switcher__menu {
+  display: grid;
+  min-width: 8.5rem;
+  padding: 0.3rem;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 0.6rem;
+  background: rgb(7 17 31 / 90%);
+  box-shadow: 0 0.8rem 2rem rgb(0 0 0 / 30%);
+  backdrop-filter: blur(8px);
+}
+
+.class-switcher__menu[hidden] {
+  display: none;
+}
+
+.class-switcher__choice {
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+}
+
+.class-switcher__choice[data-selected="true"]::after {
+  float: right;
+  content: "Current";
+  color: #f8d477;
+  font-size: 0.58rem;
+  text-transform: uppercase;
+}
+
 .ability-hotbar__slot {
   position: relative;
   display: grid;
@@ -203,6 +259,70 @@ body {
   transform: translateX(-50%);
 }
 
+.ability-hotbar__slot[data-stamp]:not([data-stamp="hidden"])::before {
+  position: absolute;
+  top: -2.35rem;
+  left: 50%;
+  display: grid;
+  width: 1.9rem;
+  height: 1.9rem;
+  place-items: center;
+  border: 3px solid #9aaabd;
+  border-radius: 50%;
+  background: rgb(3 10 20 / 92%);
+  color: #9aaabd;
+  content: "印";
+  font-size: 0.92rem;
+  font-weight: 900;
+  transform: translateX(-50%);
+}
+
+.ability-hotbar__slot[aria-keyshortcuts="1"][data-stamp="earned"]::before {
+  border-color: #ff6b6b;
+  background: #b91c1c;
+  color: #fff1f2;
+  box-shadow: 0 0 0 3px rgb(255 107 107 / 25%), 0 0 1.1rem rgb(255 107 107 / 90%);
+}
+
+.ability-hotbar__slot[aria-keyshortcuts="2"][data-stamp="earned"]::before {
+  border-color: #60a5fa;
+  background: #1d4ed8;
+  color: #eff6ff;
+  box-shadow: 0 0 0 3px rgb(96 165 250 / 25%), 0 0 1.1rem rgb(96 165 250 / 90%);
+}
+
+.ability-hotbar__slot[aria-keyshortcuts="3"][data-stamp="earned"]::before {
+  border-color: #fde047;
+  background: #a16207;
+  color: #fffbeb;
+  box-shadow: 0 0 0 3px rgb(253 224 71 / 25%), 0 0 1.1rem rgb(253 224 71 / 90%);
+}
+
+@property --combo-march-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.ability-hotbar__slot[data-combo-needed="true"] {
+  --combo-march-angle: 0deg;
+  border: 2px solid transparent;
+  background:
+    linear-gradient(rgb(3 10 20 / 94%), rgb(3 10 20 / 94%)) padding-box,
+    repeating-conic-gradient(
+      from var(--combo-march-angle),
+      #ffffff 0deg 4deg,
+      #67e8f9 4deg 8deg,
+      transparent 8deg 17deg
+    ) border-box;
+  box-shadow:
+    0 0 0 2px rgb(103 232 249 / 12%),
+    0 0 1rem rgb(34 211 238 / 72%),
+    inset 0 0 0.8rem rgb(34 211 238 / 15%);
+  filter: none;
+  animation: combo-border-march 1.15s linear infinite;
+}
+
 .ability-hotbar__slot[data-feedback="accepted"] {
   animation: ability-accepted 0.45s ease-out;
 }
@@ -247,6 +367,10 @@ body {
 
 @keyframes ability-proc-pulse {
   to { transform: translateY(-2px) scale(1.025); }
+}
+
+@keyframes combo-border-march {
+  to { --combo-march-angle: 360deg; }
 }
 
 @keyframes ability-accepted {

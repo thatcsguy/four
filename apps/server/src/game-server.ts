@@ -11,6 +11,7 @@ import {
   SIMULATION_HZ,
   SNAPSHOT_HZ,
   createInitialPlayerState,
+  createInitialCombatState,
   decodeClientMessage,
   encodeServerMessage,
   isAbilityOnGlobalCooldown,
@@ -20,6 +21,7 @@ import {
   type AbilityUseMessage,
   type AuthoritativePlayerState,
   type BossState,
+  type ClassChangeMessage,
   type InputMessage,
   type MovementInput,
   type PlayerCombatState,
@@ -362,7 +364,31 @@ export class GameServer {
       this.acceptAbilityRequest(player, decoded.data);
       return;
     }
+    if (decoded.data.type === "class_change") {
+      this.processClassChange(player, decoded.data);
+      return;
+    }
     this.acceptInput(player, decoded.data);
+  }
+
+  private processClassChange(player: PlayerConnection, request: ClassChangeMessage): void {
+    if (request.epoch !== player.epoch) {
+      this.sendProtocolError(player.socket, "invalid_message", "Class change epoch does not match this connection");
+      return;
+    }
+    const combat = createInitialCombatState(request.classId);
+    player.state = {
+      ...player.state,
+      combat,
+      stateRevision: player.state.stateRevision + 1,
+    };
+    player.abilityQueue = [];
+    this.send(player.socket, {
+      type: "class_change_result",
+      protocolVersion: PROTOCOL_VERSION,
+      epoch: player.epoch,
+      combat,
+    });
   }
 
   private acceptAbilityRequest(player: PlayerConnection, request: AbilityUseMessage): void {
@@ -457,10 +483,6 @@ export class GameServer {
       this.sendAbilityResult(player, request, false, "boss_defeated");
       return;
     }
-    if (this.projectiles.size >= COMBAT_CONSTANTS.maxActiveProjectiles) {
-      this.sendAbilityResult(player, request, false, "invalid_request");
-      return;
-    }
     const combatState = toCombatState(player.state.combat);
     if (isAbilityOnGlobalCooldown(combatState, request.slot, this.serverTick)) {
       this.sendAbilityResult(player, request, false, "global_cooldown");
@@ -484,7 +506,32 @@ export class GameServer {
       return;
     }
 
+    if (resolution.ability.delivery === "melee") {
+      const distance = Math.hypot(
+        player.state.position.x - this.boss.position.x,
+        player.state.position.z - this.boss.position.z,
+      );
+      if (resolution.ability.maxRange === undefined || distance > resolution.ability.maxRange + this.boss.hitRadius) {
+        this.sendAbilityResult(player, request, false, "out_of_range");
+        return;
+      }
+    }
+
     player.state = { ...player.state, combat: resolution.combatState };
+    if (resolution.ability.delivery === "melee") {
+      const damage = Math.min(this.boss.health, resolution.ability.damage);
+      this.boss = {
+        ...this.boss,
+        health: this.boss.health - damage,
+        stateRevision: this.boss.stateRevision + (damage > 0 ? 1 : 0),
+      };
+      this.sendAbilityResult(player, request, true, "accepted");
+      return;
+    }
+    if (this.projectiles.size >= COMBAT_CONSTANTS.maxActiveProjectiles) {
+      this.sendAbilityResult(player, request, false, "invalid_request");
+      return;
+    }
     const projectile: ProjectileState = {
       projectileId: randomUUID(),
       ownerPlayerId: player.playerId,

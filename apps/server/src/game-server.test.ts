@@ -6,11 +6,13 @@ import {
   PROTOCOL_VERSION,
   COMBAT_CONSTANTS,
   DANCER_GLOBAL_COOLDOWN_TICKS,
+  SAMURAI_GLOBAL_COOLDOWN_TICKS,
   decodeServerMessage,
   encodeClientMessage,
   type InputMessage,
   type AbilityUseMessage,
   type AbilityResultMessage,
+  type ClassChangeResultMessage,
   type ServerMessage,
   type SnapshotMessage,
   type WelcomeMessage,
@@ -366,6 +368,66 @@ describe("authoritative WebSocket server", () => {
       expect(result.accepted).toBe(true);
     }
     expect(server.diagnostics().activeProjectiles).toBeGreaterThan(0);
+  });
+
+  it("switches to Samurai, applies melee damage, earns stamps, and fires the ranged finisher", async () => {
+    const client = await connect();
+    const baseline = await welcome(client);
+    client.socket.send(encodeClientMessage({
+      type: "class_change",
+      protocolVersion: PROTOCOL_VERSION,
+      epoch: baseline.epoch,
+      classId: "samurai",
+    }));
+    const changed = await client.next((message): message is ClassChangeResultMessage =>
+      message.type === "class_change_result");
+    expect(changed.combat).toEqual({ classId: "samurai", buffs: [], globalCooldownEndsAtTick: 0 });
+
+    const sequence = [2, 3, 1, 3, 1, 2, 1, 2, 3] as const;
+    for (const [index, slot] of sequence.entries()) {
+      if (index > 0) pumpTicks(SAMURAI_GLOBAL_COOLDOWN_TICKS);
+      const requestId = index + 1;
+      client.socket.send(encodeClientMessage(ability(baseline, requestId, slot)));
+      await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+      pumpTicks(1);
+      const result = await client.next((message): message is AbilityResultMessage =>
+        message.type === "ability_result" && message.requestId === requestId);
+      expect(result.accepted).toBe(true);
+    }
+    expect(server.diagnostics()).toMatchObject({ bossHealth: 320, activeProjectiles: 0 });
+
+    pumpTicks(SAMURAI_GLOBAL_COOLDOWN_TICKS);
+    client.socket.send(encodeClientMessage(ability(baseline, 10, 4)));
+    await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+    pumpTicks(1);
+    const finisher = await client.next((message): message is AbilityResultMessage =>
+      message.type === "ability_result" && message.requestId === 10);
+    expect(finisher).toMatchObject({ accepted: true, combat: { classId: "samurai", buffs: [] } });
+    expect(server.diagnostics().activeProjectiles).toBe(1);
+  });
+
+  it("rejects Samurai melee attacks outside their range", async () => {
+    const client = await connect();
+    const baseline = await welcome(client);
+    client.socket.send(encodeClientMessage({
+      type: "class_change",
+      protocolVersion: PROTOCOL_VERSION,
+      epoch: baseline.epoch,
+      classId: "samurai",
+    }));
+    await client.next((message) => message.type === "class_change_result");
+
+    for (let sequence = 1; sequence <= 60; sequence += 1) {
+      client.socket.send(encodeClientMessage(input(baseline, sequence, { moveX: -1 })));
+    }
+    await waitFor(() => server.diagnostics().queueLengths[0] === 60);
+    pumpTicks(60);
+    client.socket.send(encodeClientMessage(ability(baseline, 1, 1)));
+    await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+    pumpTicks(1);
+    await expect(client.next((message) => message.type === "ability_result" && message.requestId === 1))
+      .resolves.toMatchObject({ accepted: false, reason: "out_of_range", combat: { buffs: [] } });
+    expect(server.diagnostics()).toMatchObject({ bossHealth: 500, activeProjectiles: 0 });
   });
 
   it("uses deterministic rolls for gated slot 1 and slot 4 procs", async () => {

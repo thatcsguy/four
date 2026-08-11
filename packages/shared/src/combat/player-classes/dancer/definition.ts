@@ -66,6 +66,7 @@ const abilitiesBySlot = Object.freeze(Object.fromEntries(
 
 export const DANCER_CLASS: PlayerClassDefinition = Object.freeze({
   id: DANCER_CLASS_ID,
+  name: "Dancer",
   abilitiesBySlot,
   createInitialState: () => ({
     classId: DANCER_CLASS_ID,

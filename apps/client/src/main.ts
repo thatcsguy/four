@@ -20,7 +20,7 @@ import {
   type ConnectionState,
 } from "./network/index.js";
 import { createSceneRenderer, type PlayerRenderState } from "./presentation/index.js";
-import { AbilityHotbar } from "./ui/index.js";
+import { AbilityHotbar, ClassSwitcher } from "./ui/index.js";
 import "./styles.css";
 
 const root = document.querySelector<HTMLElement>("#app");
@@ -49,6 +49,12 @@ if (root) {
     onUse: requestAbility,
   });
   root.append(hotbar.root);
+  const classSwitcher = new ClassSwitcher({
+    classId: disconnectedCombat.classId,
+    connected: false,
+    onSelect: (classId) => { network?.changeClass(classId); },
+  });
+  root.append(classSwitcher.root);
   view.setStatus({
     headline: "Presentation ready",
     tone: "good",
@@ -125,6 +131,7 @@ if (root) {
           view.clearPlayers();
           view.clearProjectiles();
           hotbar.setState({ combat: disconnectedCombat, connected: false, bossAlive: false, serverTick: 0 });
+          classSwitcher.setState(disconnectedCombat.classId, false);
         }
         lastConnection = diagnostics.connection;
         const tone = diagnostics.connection === "connected"
@@ -168,6 +175,7 @@ if (root) {
         bossAlive: (combat.boss?.health ?? 0) > 0,
         serverTick: diagnostics.serverTick,
       });
+      classSwitcher.setState(hotbarCombat.classId, diagnostics.connection === "connected");
       if (combat.boss !== undefined) {
         view.setBossState(combat.boss);
       }

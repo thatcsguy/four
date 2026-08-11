@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 4 as const;
+export const PROTOCOL_VERSION = 5 as const;
 
 export const SIMULATION_HZ = 60;
 export const COMMAND_HZ = 60;

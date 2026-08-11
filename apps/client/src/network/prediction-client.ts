@@ -11,8 +11,10 @@ import {
   type AbilityUseMessage,
   type AuthoritativePlayerState,
   type BossState,
+  type ClassChangeResultMessage,
   type InputMessage,
   type MovementInput,
+  type PlayerClassId,
   type ProjectileState,
   type ServerMessage,
   type SnapshotMessage,
@@ -328,6 +330,29 @@ export class PredictionClient {
     return true;
   }
 
+  changeClass(classId: PlayerClassId): boolean {
+    if (
+      this.disposed
+      || !this.visible
+      || this.connection !== "connected"
+      || !this.epoch
+      || !this.transport
+      || this.transport.readyState !== OPEN_READY_STATE
+    ) return false;
+    try {
+      this.transport.send(encodeClientMessage({
+        type: "class_change",
+        protocolVersion: PROTOCOL_VERSION,
+        epoch: this.epoch,
+        classId,
+      }));
+    } catch (error) {
+      this.reconnect(`Failed to change class: ${String(error)}`);
+      return false;
+    }
+    return true;
+  }
+
   combatState(): ClientCombatState {
     return {
       player: this.predicted?.combat === undefined ? undefined : structuredClone(this.predicted.combat),
@@ -416,6 +441,9 @@ export class PredictionClient {
         break;
       case "ability_result":
         this.acceptAbilityResult(message);
+        break;
+      case "class_change_result":
+        this.acceptClassChangeResult(message);
         break;
       case "pong":
         this.acceptPong(message.nonce);
@@ -548,6 +576,16 @@ export class PredictionClient {
       : player);
     this.deliveredAbilityResults.add(message.requestId);
     this.options.onAbilityResult?.(structuredClone(message));
+  }
+
+  private acceptClassChangeResult(message: ClassChangeResultMessage): void {
+    if (!this.epoch || message.epoch !== this.epoch || !this.playerId || !this.predicted || !this.rendered) return;
+    const combat = structuredClone(message.combat);
+    this.predicted = { ...this.predicted, combat: structuredClone(combat) };
+    this.rendered = { ...this.rendered, combat: structuredClone(combat) };
+    this.latestPlayers = this.latestPlayers.map((player) => player.playerId === this.playerId
+      ? { ...player, combat: structuredClone(combat) }
+      : player);
   }
 
   private produceCommand(nowMs: number): boolean {

@@ -127,6 +127,13 @@ export const abilityUseMessageSchema = z.object({
   slot: z.union(ABILITY_SLOTS.map((slot) => z.literal(slot))),
 }).strict();
 
+export const classChangeMessageSchema = z.object({
+  type: z.literal("class_change"),
+  protocolVersion: versionSchema,
+  epoch: epochSchema,
+  classId: z.enum(PLAYER_CLASS_IDS),
+}).strict();
+
 export const pingMessageSchema = z.object({
   type: z.literal("ping"),
   protocolVersion: versionSchema,
@@ -137,6 +144,7 @@ export const pingMessageSchema = z.object({
 export const clientMessageSchema = z.discriminatedUnion("type", [
   inputMessageSchema,
   abilityUseMessageSchema,
+  classChangeMessageSchema,
   pingMessageSchema,
 ]);
 
@@ -212,6 +220,7 @@ export const abilityResultMessageSchema = z.object({
     "accepted",
     "missing_buff",
     "global_cooldown",
+    "out_of_range",
     "boss_defeated",
     "stale_request",
     "invalid_request",
@@ -226,6 +235,13 @@ export const abilityResultMessageSchema = z.object({
     });
   }
 });
+
+export const classChangeResultMessageSchema = z.object({
+  type: z.literal("class_change_result"),
+  protocolVersion: versionSchema,
+  epoch: epochSchema,
+  combat: playerCombatStateSchema,
+}).strict();
 
 export const pongMessageSchema = z.object({
   type: z.literal("pong"),
@@ -252,6 +268,7 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
   welcomeMessageSchema,
   snapshotMessageSchema,
   abilityResultMessageSchema,
+  classChangeResultMessageSchema,
   pongMessageSchema,
   serverFullMessageSchema,
   protocolErrorMessageSchema,
@@ -265,11 +282,13 @@ export type ControlState = z.infer<typeof controlStateSchema>;
 export type AuthoritativePlayerState = z.infer<typeof authoritativePlayerStateSchema>;
 export type InputMessage = z.infer<typeof inputMessageSchema>;
 export type AbilityUseMessage = z.infer<typeof abilityUseMessageSchema>;
+export type ClassChangeMessage = z.infer<typeof classChangeMessageSchema>;
 export type PingMessage = z.infer<typeof pingMessageSchema>;
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
 export type WelcomeMessage = z.infer<typeof welcomeMessageSchema>;
 export type SnapshotMessage = z.infer<typeof snapshotMessageSchema>;
 export type AbilityResultMessage = z.infer<typeof abilityResultMessageSchema>;
+export type ClassChangeResultMessage = z.infer<typeof classChangeResultMessageSchema>;
 export type BossState = z.infer<typeof bossStateSchema>;
 export type ProjectileState = z.infer<typeof projectileStateSchema>;
 export type PongMessage = z.infer<typeof pongMessageSchema>;

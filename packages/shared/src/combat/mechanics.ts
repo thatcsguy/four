@@ -42,8 +42,9 @@ export function isAbilitySlotUsable(
 ): boolean {
   const ability = getAbilityForSlot(combatState.classId, slot);
   return ability !== undefined
-    && (ability.requiredBuffId === undefined
-      || combatState.buffs.some((buff) => buff.buffId === ability.requiredBuffId && buff.stacks > 0));
+    && [ability.requiredBuffId, ...(ability.requiredBuffIds ?? [])]
+      .filter((buffId): buffId is ReadinessBuffId => buffId !== undefined)
+      .every((buffId) => combatState.buffs.some((buff) => buff.buffId === buffId && buff.stacks > 0));
 }
 
 export function addReadinessBuff(
@@ -119,6 +120,13 @@ export function resolveAbilityUse(
     return { accepted: false, reason: "missing_buff", combatState: consumed.combatState };
   }
   let nextState = consumed.combatState;
+  for (const requiredBuffId of ability.requiredBuffIds ?? []) {
+    const nextConsumed = consumeRequiredBuff(nextState, requiredBuffId);
+    if (!nextConsumed.consumed) {
+      return { accepted: false, reason: "missing_buff", combatState: unchanged() };
+    }
+    nextState = nextConsumed.combatState;
+  }
   if (ability.guaranteedBuffId !== undefined) nextState = addReadinessBuff(nextState, ability.guaranteedBuffId);
   if (ability.procBuffId !== undefined && ability.procChance !== undefined && roll < ability.procChance) {
     nextState = addReadinessBuff(nextState, ability.procBuffId);
@@ -129,5 +137,6 @@ export function resolveAbilityUse(
       globalCooldownEndsAtTick: Math.min(Number.MAX_SAFE_INTEGER, currentTick + ability.globalCooldownTicks),
     };
   }
+  nextState = PLAYER_CLASSES[combatState.classId].resolveAcceptedAbility?.(nextState, ability) ?? nextState;
   return { accepted: true, ability, combatState: nextState };
 }
