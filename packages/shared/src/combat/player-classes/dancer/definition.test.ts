@@ -5,6 +5,9 @@ import {
   COMBAT_CONSTANTS,
   createInitialCombatState,
   DANCER_ABILITIES,
+  DANCER_GLOBAL_COOLDOWN_SECONDS,
+  DANCER_GLOBAL_COOLDOWN_TICKS,
+  GLOOP_BOSS,
   getAbilityForSlot,
   globalCooldownRemainingTicks,
   isAbilityOnGlobalCooldown,
@@ -12,32 +15,30 @@ import {
   resolveAbilityUse,
   type AbilitySlot,
   type PlayerCombatState,
-} from "./combat.js";
+} from "../../index.js";
 
 describe("combat content", () => {
   it("centralizes the required immutable tuning", () => {
-    expect(Object.values(DANCER_ABILITIES).map(({ slot, damage, requiredBuffId }) => ({
-      slot,
-      damage,
-      requiredBuffId,
+    expect(Object.values(DANCER_ABILITIES).map((ability) => ({
+      slot: ability.slot,
+      damage: ability.damage,
+      requiredBuffId: "requiredBuffId" in ability ? ability.requiredBuffId : undefined,
     }))).toEqual([
       { slot: 1, damage: 25, requiredBuffId: "dancer_1_ready" },
       { slot: 2, damage: 10, requiredBuffId: undefined },
       { slot: 3, damage: 10, requiredBuffId: "dancer_3_ready" },
       { slot: 4, damage: 25, requiredBuffId: "dancer_4_ready" },
     ]);
-    expect(COMBAT_CONSTANTS).toMatchObject({
-      dancerGlobalCooldownSeconds: 2.5,
-      dancerGlobalCooldownTicks: 150,
-      boss: {
-        id: "gloop",
-        maxHealth: 50_000,
-        position: { x: 0, y: 0, z: 0 },
-        aimPoint: { x: 0, y: 1.6, z: 0 },
-        hitRadius: 1.7,
-      },
-      projectile: { speed: 36, spawnHeight: 1.2 },
+    expect(DANCER_GLOBAL_COOLDOWN_SECONDS).toBe(2.5);
+    expect(DANCER_GLOBAL_COOLDOWN_TICKS).toBe(150);
+    expect(GLOOP_BOSS).toMatchObject({
+      id: "gloop",
+      maxHealth: 50_000,
+      position: { x: 0, y: 0, z: 0 },
+      aimPoint: { x: 0, y: 1.6, z: 0 },
+      hitRadius: 1.7,
     });
+    expect(COMBAT_CONSTANTS.projectile).toEqual({ speed: 36, spawnHeight: 1.2 });
     expect(Object.isFrozen(DANCER_ABILITIES)).toBe(true);
     expect(Object.values(DANCER_ABILITIES).every(Object.isFrozen)).toBe(true);
   });

@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BossState } from "@four/shared";
 
-import { BossVisual, DEFAULT_BOSS_STATE } from "./boss-visual.js";
-import { Nameplate } from "./nameplate.js";
+import { DEFAULT_GLOOP_STATE, GloopVisual } from "./gloop-visual.js";
+import { Nameplate } from "../../../presentation/nameplate.js";
 
 function boss(health: number, stateRevision: number): BossState {
-  return { ...DEFAULT_BOSS_STATE, health, stateRevision };
+  return { ...DEFAULT_GLOOP_STATE, health, stateRevision };
 }
 
 afterEach(() => {
@@ -14,7 +14,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("BossVisual", () => {
+describe("GloopVisual", () => {
   it("updates the nameplate from authoritative health revisions and stays visible at zero", () => {
     vi.stubGlobal("document", {
       createElement: () => ({
@@ -24,7 +24,7 @@ describe("BossVisual", () => {
       }),
     });
     const setNameplate = vi.spyOn(Nameplate.prototype, "set");
-    const visual = new BossVisual(boss(50_000, 0));
+    const visual = new GloopVisual(boss(50_000, 0));
     setNameplate.mockClear();
 
     visual.setState(boss(35_000, 1));

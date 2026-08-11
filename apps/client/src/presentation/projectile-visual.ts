@@ -1,9 +1,7 @@
-import {
-  DANCER_ABILITIES,
-  type AbilityId,
-  type ProjectileState,
-} from "@four/shared";
+import { type AbilityId, type ProjectileState } from "@four/shared";
 import * as THREE from "three";
+
+import { getProjectileStyle } from "../game-content/player-classes/registry.js";
 
 const MAX_RENDER_DELTA_SECONDS = 0.1;
 const EPSILON = 1e-9;
@@ -28,17 +26,7 @@ interface MutableVector3Like {
 }
 
 export function projectileStyleForAbility(abilityId: AbilityId): ProjectileStyle {
-  const slot = DANCER_ABILITIES[abilityId].slot;
-  switch (slot) {
-    case 1:
-      return { color: 0xff6b73, emissive: 0xff2438, radius: 0.34, opacity: 1 };
-    case 2:
-      return { color: 0x7dd3fc, emissive: 0x1976a3, radius: 0.24, opacity: 0.9 };
-    case 3:
-      return { color: 0xc4b5fd, emissive: 0x654fb8, radius: 0.24, opacity: 0.9 };
-    case 4:
-      return { color: 0xffd86b, emissive: 0xff8a1f, radius: 0.36, opacity: 1 };
-  }
+  return getProjectileStyle(abilityId);
 }
 
 /** Advances toward a target without overshoot, returning the unchanged position for unsafe deltas. */

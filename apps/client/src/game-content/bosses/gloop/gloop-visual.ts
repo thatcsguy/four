@@ -1,19 +1,20 @@
-import { BOSS_ID, COMBAT_CONSTANTS, type BossState } from "@four/shared";
+import { GLOOP_BOSS, type BossState } from "@four/shared";
 import * as THREE from "three";
 
-import { Nameplate } from "./nameplate.js";
+import { Nameplate } from "../../../presentation/nameplate.js";
+import type { BossVisualHandle } from "../types.js";
 
-export const DEFAULT_BOSS_STATE: Readonly<BossState> = Object.freeze({
-  bossId: BOSS_ID,
-  name: COMBAT_CONSTANTS.boss.name,
-  health: COMBAT_CONSTANTS.boss.maxHealth,
-  maxHealth: COMBAT_CONSTANTS.boss.maxHealth,
-  position: COMBAT_CONSTANTS.boss.position,
-  hitRadius: COMBAT_CONSTANTS.boss.hitRadius,
+export const DEFAULT_GLOOP_STATE: Readonly<BossState> = Object.freeze({
+  bossId: GLOOP_BOSS.id,
+  name: GLOOP_BOSS.name,
+  health: GLOOP_BOSS.maxHealth,
+  maxHealth: GLOOP_BOSS.maxHealth,
+  position: GLOOP_BOSS.position,
+  hitRadius: GLOOP_BOSS.hitRadius,
   stateRevision: 0,
 });
 
-export class BossVisual {
+export class GloopVisual implements BossVisualHandle {
   readonly root = new THREE.Group();
 
   private readonly body: THREE.Group;
@@ -24,7 +25,7 @@ export class BossVisual {
   private lastRevision = -1;
   private elapsed = 0;
 
-  constructor(initialState: Readonly<BossState> = DEFAULT_BOSS_STATE) {
+  constructor(initialState: Readonly<BossState> = DEFAULT_GLOOP_STATE) {
     this.root.position.set(initialState.position.x, initialState.position.y, initialState.position.z);
     this.body = new THREE.Group();
     this.root.add(this.body);

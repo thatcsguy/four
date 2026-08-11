@@ -1,5 +1,7 @@
 import {
-  COMBAT_CONSTANTS,
+  ACTIVE_BOSS_ID,
+  getBossDefinition,
+  type BossId,
   type BossState,
   type ProjectileState,
 } from "@four/shared";
@@ -9,8 +11,8 @@ export interface CombatStepResult {
   readonly projectiles: ProjectileState[];
 }
 
-export function createInitialBossState(): BossState {
-  const definition = COMBAT_CONSTANTS.boss;
+export function createInitialBossState(bossId: BossId = ACTIVE_BOSS_ID): BossState {
+  const definition = getBossDefinition(bossId);
   return {
     bossId: definition.id,
     name: definition.name,
@@ -33,10 +35,11 @@ export function advanceCombat(
 
   let nextBoss: BossState = copyBoss(boss);
   const remaining: ProjectileState[] = [];
+  const definition = getBossDefinition(boss.bossId as BossId);
   const target = {
-    x: boss.position.x + COMBAT_CONSTANTS.boss.aimPoint.x - COMBAT_CONSTANTS.boss.position.x,
-    y: boss.position.y + COMBAT_CONSTANTS.boss.aimPoint.y - COMBAT_CONSTANTS.boss.position.y,
-    z: boss.position.z + COMBAT_CONSTANTS.boss.aimPoint.z - COMBAT_CONSTANTS.boss.position.z,
+    x: boss.position.x + definition.aimPoint.x - definition.position.x,
+    y: boss.position.y + definition.aimPoint.y - definition.position.y,
+    z: boss.position.z + definition.aimPoint.z - definition.position.z,
   };
 
   for (const projectile of projectiles) {

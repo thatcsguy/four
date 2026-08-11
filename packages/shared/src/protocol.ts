@@ -10,7 +10,7 @@ import {
 import {
   ABILITY_SLOTS,
   COMBAT_CONSTANTS,
-  DANCER_ABILITY_IDS,
+  ABILITY_IDS,
   PLAYER_CLASS_IDS,
 } from "./combat.js";
 
@@ -162,7 +162,7 @@ export const bossStateSchema = z.object({
 export const projectileStateSchema = z.object({
   projectileId: identifierSchema,
   ownerPlayerId: identifierSchema,
-  abilityId: z.enum(DANCER_ABILITY_IDS),
+  abilityId: z.enum(ABILITY_IDS),
   targetId: identifierSchema,
   position: vector3Schema,
   speed: finiteNumberSchema.positive(),

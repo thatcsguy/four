@@ -1,4 +1,4 @@
-import { COMBAT_CONSTANTS, type ProjectileState } from "@four/shared";
+import { COMBAT_CONSTANTS, GLOOP_BOSS, type ProjectileState } from "@four/shared";
 import { describe, expect, it } from "vitest";
 
 import { advanceCombat, createInitialBossState } from "./combat-simulation.js";
@@ -24,7 +24,7 @@ describe("combat simulation", () => {
     expect(result.projectiles[0]?.position.x).toBeCloseTo(-2.8, 10);
     expect(result.projectiles[0]?.position.y).toBeCloseTo(1.6, 10);
     expect(result.projectiles[0]?.position.z).toBeCloseTo(0, 10);
-    expect(result.boss.health).toBe(COMBAT_CONSTANTS.boss.maxHealth);
+    expect(result.boss.health).toBe(GLOOP_BOSS.maxHealth);
   });
 
   it("damages once on collision, clamps health, and removes later impacts in insertion order", () => {
@@ -41,7 +41,7 @@ describe("combat simulation", () => {
     const boss = createInitialBossState();
     const source = projectile();
     advanceCombat(boss, [source], 1 / 60);
-    expect(boss.health).toBe(COMBAT_CONSTANTS.boss.maxHealth);
+    expect(boss.health).toBe(GLOOP_BOSS.maxHealth);
     expect(source.position.x).toBe(-10);
   });
 });

@@ -5,6 +5,7 @@ import {
   MAX_ACTIVE_PLAYERS,
   PROTOCOL_VERSION,
   COMBAT_CONSTANTS,
+  DANCER_GLOBAL_COOLDOWN_TICKS,
   decodeServerMessage,
   encodeClientMessage,
   type InputMessage,
@@ -355,7 +356,7 @@ describe("authoritative WebSocket server", () => {
     expect(baseline.baseline.projectiles).toEqual([]);
 
     for (const [index, slot] of [2, 3, 2, 3].entries()) {
-      if (index > 0) pumpTicks(COMBAT_CONSTANTS.dancerGlobalCooldownTicks);
+      if (index > 0) pumpTicks(DANCER_GLOBAL_COOLDOWN_TICKS);
       const requestId = index + 1;
       client.socket.send(encodeClientMessage(ability(baseline, requestId, slot as 2 | 3)));
       await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
@@ -373,7 +374,7 @@ describe("authoritative WebSocket server", () => {
     const baseline = await welcome(client);
 
     for (const [requestId, slot] of [[1, 2], [2, 1], [3, 2], [4, 3], [5, 4]] as const) {
-      if (requestId > 1) pumpTicks(COMBAT_CONSTANTS.dancerGlobalCooldownTicks);
+      if (requestId > 1) pumpTicks(DANCER_GLOBAL_COOLDOWN_TICKS);
       client.socket.send(encodeClientMessage(ability(baseline, requestId, slot)));
       await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
       pumpTicks(1);
@@ -417,7 +418,7 @@ describe("authoritative WebSocket server", () => {
     const opening = await client.next((message): message is AbilityResultMessage =>
       message.type === "ability_result" && message.requestId === 1);
     expect(opening).toMatchObject({ accepted: true, reason: "accepted" });
-    expect(opening.combat.globalCooldownEndsAtTick).toBe(COMBAT_CONSTANTS.dancerGlobalCooldownTicks + 1);
+    expect(opening.combat.globalCooldownEndsAtTick).toBe(DANCER_GLOBAL_COOLDOWN_TICKS + 1);
 
     client.socket.send(encodeClientMessage(ability(baseline, 2, 3)));
     await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
@@ -431,7 +432,7 @@ describe("authoritative WebSocket server", () => {
     });
     expect(randomRolls).toEqual([0.75]);
 
-    pumpTicks(COMBAT_CONSTANTS.dancerGlobalCooldownTicks);
+    pumpTicks(DANCER_GLOBAL_COOLDOWN_TICKS);
     client.socket.send(encodeClientMessage(ability(baseline, 3, 3)));
     await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
     pumpTicks(1);
@@ -492,7 +493,7 @@ describe("authoritative WebSocket server", () => {
     let requestId = 0;
     for (let cycle = 0; cycle < 7; cycle += 1) {
       for (const slot of [2, 1, 3, 4] as const) {
-        if (requestId > 0) pumpTicks(COMBAT_CONSTANTS.dancerGlobalCooldownTicks);
+        if (requestId > 0) pumpTicks(DANCER_GLOBAL_COOLDOWN_TICKS);
         requestId += 1;
         client.socket.send(encodeClientMessage(ability(baseline, requestId, slot)));
         await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
@@ -503,7 +504,7 @@ describe("authoritative WebSocket server", () => {
     pumpTicks(2);
     expect(server.diagnostics().bossHealth).toBe(10);
 
-    pumpTicks(COMBAT_CONSTANTS.dancerGlobalCooldownTicks);
+    pumpTicks(DANCER_GLOBAL_COOLDOWN_TICKS);
     requestId += 1;
     client.socket.send(encodeClientMessage(ability(baseline, requestId, 2)));
     await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);

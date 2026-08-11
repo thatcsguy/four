@@ -1,14 +1,18 @@
 import {
   CAMERA_CONSTANTS,
-  COMBAT_CONSTANTS,
+  type BossId,
   type BossState,
   type ProjectileState,
 } from "@four/shared";
 import * as THREE from "three";
 
+import {
+  bossAimPoint,
+  createBossVisual,
+  DEFAULT_BOSS_STATE,
+} from "../game-content/bosses/registry.js";
 import { createArena } from "./arena.js";
 import { CharacterVisual } from "./character-visual.js";
-import { BossVisual, DEFAULT_BOSS_STATE } from "./boss-visual.js";
 import { ProjectileVisualManager } from "./projectile-visual.js";
 import { StatusView, type StatusContent } from "./status-view.js";
 import {
@@ -67,13 +71,14 @@ export function createSceneRenderer(root: HTMLElement): SceneRenderer {
   scene.background = new THREE.Color(0x07111f);
   scene.fog = new THREE.Fog(0x07111f, 34, 74);
   scene.add(createArena());
-  const boss = new BossVisual();
+  const boss = createBossVisual();
   scene.add(boss.root);
   const projectileVisuals = new ProjectileVisualManager(scene);
-  const bossAimPoint = new THREE.Vector3(
-    DEFAULT_BOSS_STATE.position.x + COMBAT_CONSTANTS.boss.aimPoint.x,
-    DEFAULT_BOSS_STATE.position.y + COMBAT_CONSTANTS.boss.aimPoint.y,
-    DEFAULT_BOSS_STATE.position.z + COMBAT_CONSTANTS.boss.aimPoint.z,
+  const aimPointOffset = bossAimPoint(DEFAULT_BOSS_STATE.bossId as BossId);
+  const bossTarget = new THREE.Vector3(
+    DEFAULT_BOSS_STATE.position.x + aimPointOffset.x,
+    DEFAULT_BOSS_STATE.position.y + aimPointOffset.y,
+    DEFAULT_BOSS_STATE.position.z + aimPointOffset.z,
   );
 
   const camera = new THREE.PerspectiveCamera(
@@ -134,7 +139,7 @@ export function createSceneRenderer(root: HTMLElement): SceneRenderer {
       visual.update(deltaSeconds);
     }
     boss.update(deltaSeconds);
-    projectileVisuals.update(frame.nowMilliseconds, bossAimPoint);
+    projectileVisuals.update(frame.nowMilliseconds, bossTarget);
     renderer.render(scene, camera);
   }
 
@@ -207,10 +212,11 @@ export function createSceneRenderer(root: HTMLElement): SceneRenderer {
     },
     setBossState(state): void {
       boss.setState(state);
-      bossAimPoint.set(
-        state.position.x + COMBAT_CONSTANTS.boss.aimPoint.x,
-        state.position.y + COMBAT_CONSTANTS.boss.aimPoint.y,
-        state.position.z + COMBAT_CONSTANTS.boss.aimPoint.z,
+      const offset = bossAimPoint(state.bossId as BossId);
+      bossTarget.set(
+        state.position.x + offset.x,
+        state.position.y + offset.y,
+        state.position.z + offset.z,
       );
     },
     setProjectiles(projectiles, serverTick, nowMilliseconds): void {

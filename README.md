@@ -10,6 +10,25 @@ Four is a first-playable browser multiplayer combat demo. Up to four clients aut
 
 Clients send normalized world-space XZ intent plus held jump intent; they never send transforms. Ability presses are ordered requests, not predicted outcomes. The server owns player membership, canonical movement, class assignment, readiness buffs, proc rolls, homing projectiles, boss health, and damage. Camera, animation, and projectile extrapolation remain presentation-only.
 
+### Adding combat content
+
+Combat content is organized by feature, with registries acting as the only composition points:
+
+```text
+packages/shared/src/combat/
+  player-classes/dancer/   # Dancer IDs, abilities, tuning, and initial state
+  bosses/gloop/            # Gloop identity, stats, spawn, and hit geometry
+  player-classes/registry.ts
+  bosses/registry.ts
+  mechanics.ts             # Class-agnostic ability and buff rules
+
+apps/client/src/game-content/
+  player-classes/dancer/   # Dancer-only presentation data
+  bosses/gloop/            # Gloop mesh, animation, and presentation tests
+```
+
+To add a class or boss, create its folder, export one definition from its local `index.ts`, and register it in the adjacent registry. Shared mechanics, protocol validation, server simulation, and generic presentation code consume those registries and should not gain per-content conditionals.
+
 ## Setup and commands
 
 Node.js 18.18 or newer and npm are required. From the repository root:
