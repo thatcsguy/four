@@ -1,8 +1,12 @@
 import {
   FIXED_DELTA_SECONDS,
   PROTOCOL_VERSION,
+  createInitialCombatState,
   createInitialPlayerState,
   stepPlayer,
+  type AbilitySlot,
+  type AuthoritativePlayerState,
+  type PlayerCombatState,
 } from "@four/shared";
 
 import { CameraController } from "./camera/index.js";
@@ -16,6 +20,7 @@ import {
   type ConnectionState,
 } from "./network/index.js";
 import { createSceneRenderer, type PlayerRenderState } from "./presentation/index.js";
+import { AbilityHotbar } from "./ui/index.js";
 import "./styles.css";
 
 const root = document.querySelector<HTMLElement>("#app");
@@ -32,6 +37,18 @@ if (root) {
   let followedFeet = { x: 0, y: 0, z: 0 };
   let removeFrameListener: (() => void) | undefined;
   let network: PredictionClient | undefined;
+  const disconnectedCombat = createInitialCombatState();
+  let lastConnection: ConnectionState = "idle";
+  const requestAbility = (slot: AbilitySlot): void => {
+    if (network?.useAbility(slot) !== true) {
+      hotbar.showFeedback(slot, false);
+    }
+  };
+  const hotbar = new AbilityHotbar({
+    state: { combat: disconnectedCombat, connected: false, bossAlive: false, serverTick: 0 },
+    onUse: requestAbility,
+  });
+  root.append(hotbar.root);
   view.setStatus({
     headline: "Presentation ready",
     tone: "good",
@@ -92,7 +109,6 @@ if (root) {
       metrics: { simulation: "60 Hz", networking: "offline" },
     });
   } else {
-    let lastConnection: ConnectionState = "idle";
     const remoteIds = new Set<string>();
     const networkConditions = import.meta.env.DEV ? parseNetworkConditions(query) : undefined;
     network = new PredictionClient({
@@ -101,11 +117,14 @@ if (root) {
         ? (url) => withNetworkConditions(createBrowserTransport(url), networkConditions)
         : createBrowserTransport,
       sampleIntent: () => input.sampleMovement(camera.yaw),
+      onAbilityResult: (result) => hotbar.showFeedback(result.slot, result.accepted),
       onDiagnostics: (diagnostics) => {
         diagnosticsOverlay.update(diagnostics);
         if (diagnostics.connection !== "connected" && lastConnection === "connected") {
           input.reset();
           view.clearPlayers();
+          view.clearProjectiles();
+          hotbar.setState({ combat: disconnectedCombat, connected: false, bossAlive: false, serverTick: 0 });
         }
         lastConnection = diagnostics.connection;
         const tone = diagnostics.connection === "connected"
@@ -131,10 +150,28 @@ if (root) {
     network.connect();
     const onVisibilityChange = (): void => network?.setVisible(!document.hidden);
     document.addEventListener("visibilitychange", onVisibilityChange);
-    removeFrameListener = view.onFrame(({ deltaSeconds }) => {
+    removeFrameListener = view.onFrame(({ deltaSeconds, nowMilliseconds }) => {
       const activeNetwork = network;
       if (!activeNetwork) return;
+      for (const slot of input.consumeAbilityPresses()) {
+        requestAbility(slot);
+      }
       activeNetwork.advancePresentation(deltaSeconds * 1_000);
+      const diagnostics = activeNetwork.diagnostics();
+      const combat = activeNetwork.combatState();
+      const hotbarCombat = combat.player === undefined
+        ? disconnectedCombat
+        : toHotbarCombatState(combat.player);
+      hotbar.setState({
+        combat: hotbarCombat,
+        connected: diagnostics.connection === "connected",
+        bossAlive: (combat.boss?.health ?? 0) > 0,
+        serverTick: diagnostics.serverTick,
+      });
+      if (combat.boss !== undefined) {
+        view.setBossState(combat.boss);
+      }
+      view.setProjectiles(combat.projectiles, diagnostics.serverTick, nowMilliseconds);
       const rendered = activeNetwork.renderedState();
       if (rendered) {
         followedFeet = { ...rendered.position };
@@ -195,6 +232,7 @@ if (root) {
     removeFrameListener?.();
     network?.dispose();
     diagnosticsOverlay.dispose();
+    hotbar.dispose();
     input.dispose();
     view.dispose();
   };
@@ -203,6 +241,16 @@ if (root) {
     window.removeEventListener("pagehide", dispose);
     dispose();
   });
+}
+
+function toHotbarCombatState(combat: AuthoritativePlayerState["combat"]): PlayerCombatState {
+  return {
+    classId: combat.classId,
+    globalCooldownEndsAtTick: combat.globalCooldownEndsAtTick,
+    buffs: combat.buffs.map((buff) => buff.expiresAtTick === undefined
+      ? { buffId: buff.buffId, stacks: buff.stacks }
+      : { buffId: buff.buffId, stacks: buff.stacks, expiresAtTick: buff.expiresAtTick }),
+  };
 }
 
 function connectionHeadline(connection: ConnectionState): string {

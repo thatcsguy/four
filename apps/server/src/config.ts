@@ -10,6 +10,7 @@ export const MAX_CATCH_UP_STEPS = 5;
 /** Repeat the last processed held intent for at most 100 ms, then go neutral. */
 export const MISSING_INPUT_GRACE_TICKS = 6;
 export const MAX_INPUT_QUEUE_LENGTH = 120;
+export const MAX_ABILITY_QUEUE_LENGTH = 32;
 export const MAX_MESSAGE_BYTES = 4_096;
 export const MAX_MESSAGES_PER_SECOND = 120;
 export const RATE_LIMIT_WINDOW_MS = 1_000;

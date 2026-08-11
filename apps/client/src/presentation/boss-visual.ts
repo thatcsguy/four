@@ -1,22 +1,35 @@
+import { BOSS_ID, COMBAT_CONSTANTS, type BossState } from "@four/shared";
 import * as THREE from "three";
 
 import { Nameplate } from "./nameplate.js";
 
-export const BOSS = Object.freeze({ name: "Gloop", health: 500, maxHealth: 500 });
+export const DEFAULT_BOSS_STATE: Readonly<BossState> = Object.freeze({
+  bossId: BOSS_ID,
+  name: COMBAT_CONSTANTS.boss.name,
+  health: COMBAT_CONSTANTS.boss.maxHealth,
+  maxHealth: COMBAT_CONSTANTS.boss.maxHealth,
+  position: COMBAT_CONSTANTS.boss.position,
+  hitRadius: COMBAT_CONSTANTS.boss.hitRadius,
+  stateRevision: 0,
+});
 
 export class BossVisual {
   readonly root = new THREE.Group();
 
   private readonly body: THREE.Group;
   private readonly nameplate: Nameplate;
+  private readonly slimeMaterial: THREE.MeshPhysicalMaterial;
+  private defeated = false;
+  private lastHealth = -1;
+  private lastRevision = -1;
   private elapsed = 0;
 
-  constructor() {
-    this.root.position.set(0, 0, 0);
+  constructor(initialState: Readonly<BossState> = DEFAULT_BOSS_STATE) {
+    this.root.position.set(initialState.position.x, initialState.position.y, initialState.position.z);
     this.body = new THREE.Group();
     this.root.add(this.body);
 
-    const slimeMaterial = new THREE.MeshPhysicalMaterial({
+    this.slimeMaterial = new THREE.MeshPhysicalMaterial({
       color: 0x74e45d,
       emissive: 0x1b6b2a,
       emissiveIntensity: 0.18,
@@ -27,14 +40,14 @@ export class BossVisual {
     const darkMaterial = new THREE.MeshStandardMaterial({ color: 0x10251b, roughness: 0.5 });
     const shineMaterial = new THREE.MeshBasicMaterial({ color: 0xeaffea });
 
-    const core = new THREE.Mesh(new THREE.SphereGeometry(1.72, 32, 20), slimeMaterial);
+    const core = new THREE.Mesh(new THREE.SphereGeometry(1.72, 32, 20), this.slimeMaterial);
     core.scale.set(1.15, 0.92, 1.05);
     core.position.y = 1.62;
     core.castShadow = true;
     this.body.add(core);
 
     for (const [x, z, scale] of [[-1.25, 0.2, 0.72], [1.2, 0.25, 0.76], [-0.65, -1.05, 0.62], [0.75, -1, 0.66]] as const) {
-      const lobe = new THREE.Mesh(new THREE.SphereGeometry(0.78, 20, 12), slimeMaterial);
+      const lobe = new THREE.Mesh(new THREE.SphereGeometry(0.78, 20, 12), this.slimeMaterial);
       lobe.scale.set(scale * 1.35, scale * 0.66, scale);
       lobe.position.set(x, 0.58, z);
       lobe.castShadow = true;
@@ -64,14 +77,30 @@ export class BossVisual {
     shadow.position.y = 0.025;
     this.root.add(shadow);
 
-    this.nameplate = new Nameplate(BOSS.name, BOSS.health, BOSS.maxHealth, 4.5);
+    this.nameplate = new Nameplate(initialState.name, initialState.health, initialState.maxHealth, 4.5);
     this.nameplate.sprite.position.y = 4.3;
     this.root.add(this.nameplate.sprite);
+    this.setState(initialState);
+  }
+
+  setState(state: Readonly<BossState>): void {
+    this.root.position.set(state.position.x, state.position.y, state.position.z);
+    if (state.health !== this.lastHealth || state.stateRevision !== this.lastRevision) {
+      this.lastHealth = state.health;
+      this.lastRevision = state.stateRevision;
+      this.nameplate.set(state.name, state.health, state.maxHealth);
+    }
+    this.defeated = state.health <= 0;
+    this.slimeMaterial.emissiveIntensity = this.defeated ? 0.035 : 0.18;
+    this.slimeMaterial.opacity = this.defeated ? 0.72 : 1;
+    this.slimeMaterial.transparent = this.defeated;
   }
 
   update(deltaSeconds: number): void {
     this.elapsed += Math.min(Math.max(deltaSeconds, 0), 0.1);
-    const pulse = 1 + Math.sin(this.elapsed * 1.8) * 0.025;
+    const pulseRate = this.defeated ? 0.55 : 1.8;
+    const pulseAmount = this.defeated ? 0.009 : 0.025;
+    const pulse = 1 + Math.sin(this.elapsed * pulseRate) * pulseAmount;
     this.body.scale.set(1 / Math.sqrt(pulse), pulse, 1 / Math.sqrt(pulse));
   }
 

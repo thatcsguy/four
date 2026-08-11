@@ -133,3 +133,150 @@ body {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+.ability-hotbar {
+  position: fixed;
+  z-index: 4;
+  left: 50%;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-columns: repeat(4, minmax(3.6rem, 7rem));
+  gap: clamp(0.25rem, 1vw, 0.55rem);
+  width: min(31rem, calc(100vw - 2rem));
+  transform: translateX(-50%);
+}
+
+.ability-hotbar__slot {
+  position: relative;
+  display: grid;
+  grid-template-areas:
+    "key damage"
+    "name name"
+    "reason reason";
+  min-width: 0;
+  min-height: 4.6rem;
+  padding: 0.42rem;
+  border: 1px solid rgb(125 211 252 / 52%);
+  border-radius: 0.55rem;
+  background: rgb(3 10 20 / 88%);
+  color: #e9f6ff;
+  box-shadow: 0 0.45rem 1.2rem rgb(0 0 0 / 25%);
+  cursor: pointer;
+}
+
+.ability-hotbar__slot:focus-visible {
+  outline: 3px solid #f8d477;
+  outline-offset: 2px;
+}
+
+.ability-hotbar__slot:disabled {
+  border-color: rgb(143 168 194 / 25%);
+  color: #8293a7;
+  filter: saturate(0.55);
+  cursor: not-allowed;
+}
+
+.ability-hotbar__slot[data-global-cooldown="true"] {
+  border-color: rgb(125 211 252 / 34%);
+  filter: saturate(0.7) brightness(0.78);
+}
+
+.ability-hotbar__slot[data-proc-ready="true"] {
+  border-width: 2px;
+  border-color: #f8d477;
+  box-shadow: 0 0 0 2px rgb(248 212 119 / 20%), 0 0 1.1rem rgb(251 146 60 / 55%);
+  animation: ability-proc-pulse 1s ease-in-out infinite alternate;
+}
+
+.ability-hotbar__slot[data-proc-ready="true"]::after {
+  position: absolute;
+  top: -0.55rem;
+  left: 50%;
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.3rem;
+  background: #f8d477;
+  color: #301b05;
+  content: "READY";
+  font-size: 0.52rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  transform: translateX(-50%);
+}
+
+.ability-hotbar__slot[data-feedback="accepted"] {
+  animation: ability-accepted 0.45s ease-out;
+}
+
+.ability-hotbar__slot[data-feedback="rejected"] {
+  animation: ability-rejected 0.22s ease-in-out 2;
+}
+
+.ability-hotbar__key {
+  grid-area: key;
+  justify-self: start;
+  padding: 0.08rem 0.3rem;
+  border: 1px solid currentcolor;
+  border-radius: 0.25rem;
+  font: 700 0.72rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.ability-hotbar__name {
+  grid-area: name;
+  overflow: hidden;
+  align-self: end;
+  font-size: clamp(0.66rem, 2.5vw, 0.8rem);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ability-hotbar__damage {
+  grid-area: damage;
+  justify-self: end;
+  color: #a8dff6;
+  font-size: 0.62rem;
+}
+
+.ability-hotbar__reason {
+  grid-area: reason;
+  min-height: 0.8rem;
+  color: #a8b6c6;
+  font-size: 0.58rem;
+  white-space: nowrap;
+}
+
+@keyframes ability-proc-pulse {
+  to { transform: translateY(-2px) scale(1.025); }
+}
+
+@keyframes ability-accepted {
+  50% { transform: translateY(-4px); filter: brightness(1.5); }
+}
+
+@keyframes ability-rejected {
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+@media (max-width: 720px), (max-height: 360px) {
+  .ability-hotbar {
+    right: auto;
+    bottom: max(0.35rem, env(safe-area-inset-bottom));
+    width: min(24rem, calc(100vw - 0.7rem));
+  }
+
+  .ability-hotbar__slot {
+    min-height: 3.65rem;
+    padding: 0.3rem;
+  }
+
+  .ability-hotbar__damage {
+    font-size: 0.55rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ability-hotbar__slot {
+    animation: none !important;
+  }
+}

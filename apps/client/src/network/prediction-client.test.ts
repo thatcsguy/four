@@ -9,7 +9,11 @@ import {
   encodeServerMessage,
   stepPlayer,
   type AuthoritativePlayerState,
+  type AbilityResultMessage,
+  type AbilityUseMessage,
+  type BossState,
   type InputMessage,
+  type ProjectileState,
   type ServerMessage,
   type SnapshotMessage,
   type WelcomeMessage,
@@ -66,6 +70,27 @@ class FakeTransport implements ClientTransport {
   }
 }
 
+const initialBoss: BossState = {
+  bossId: "gloop",
+  name: "Gloop",
+  health: 50_000,
+  maxHealth: 50_000,
+  position: { x: 0, y: 0, z: 0 },
+  hitRadius: 1.7,
+  stateRevision: 0,
+};
+
+const initialProjectile: ProjectileState = {
+  projectileId: "projectile-1",
+  ownerPlayerId: "local",
+  abilityId: "dancer_2",
+  targetId: "gloop",
+  position: { x: 1, y: 1.2, z: 2 },
+  speed: 36,
+  damage: 10,
+  spawnedAtTick: 60,
+};
+
 function welcome(state = createInitialPlayerState({ playerId: "local" }), epoch = "epoch-1"): WelcomeMessage {
   return {
     type: "welcome",
@@ -74,7 +99,13 @@ function welcome(state = createInitialPlayerState({ playerId: "local" }), epoch 
     epoch,
     rates: { simulationHz: SIMULATION_HZ, commandHz: COMMAND_HZ, snapshotHz: SNAPSHOT_HZ },
     initialServerTick: 60,
-    baseline: { snapshotSequence: 4, serverTick: 60, players: [state] },
+    baseline: {
+      snapshotSequence: 4,
+      serverTick: 60,
+      players: [state],
+      boss: initialBoss,
+      projectiles: [initialProjectile],
+    },
   };
 }
 
@@ -90,6 +121,8 @@ function snapshot(
     snapshotSequence: sequence,
     serverTick: 60 + sequence,
     players: [state],
+    boss: initialBoss,
+    projectiles: [initialProjectile],
   };
 }
 
@@ -121,6 +154,30 @@ function sentInputs(transport: FakeTransport): InputMessage[] {
     const decoded = decodeClientMessage(raw);
     return decoded.success && decoded.data.type === "input" ? [decoded.data] : [];
   });
+}
+
+function sentAbilities(transport: FakeTransport): AbilityUseMessage[] {
+  return transport.sent.flatMap((raw) => {
+    const decoded = decodeClientMessage(raw);
+    return decoded.success && decoded.data.type === "ability_use" ? [decoded.data] : [];
+  });
+}
+
+function abilityResult(
+  requestId: number,
+  combat: AuthoritativePlayerState["combat"],
+  epoch = "epoch-1",
+): AbilityResultMessage {
+  return {
+    type: "ability_result",
+    protocolVersion: PROTOCOL_VERSION,
+    epoch,
+    requestId,
+    slot: 2,
+    accepted: true,
+    reason: "accepted",
+    combat,
+  };
 }
 
 describe("fixed command production", () => {
@@ -243,6 +300,135 @@ describe("snapshot reconciliation", () => {
   });
 });
 
+describe("authoritative combat networking", () => {
+  it("sends one ordered ability command without touching movement sequencing", () => {
+    const { client, transport } = setup();
+    const before = client.diagnostics();
+
+    expect(client.useAbility(2)).toBe(true);
+    expect(client.useAbility(3)).toBe(true);
+
+    expect(sentAbilities(transport)).toEqual([
+      { type: "ability_use", protocolVersion: PROTOCOL_VERSION, epoch: "epoch-1", requestId: 1, slot: 2 },
+      { type: "ability_use", protocolVersion: PROTOCOL_VERSION, epoch: "epoch-1", requestId: 2, slot: 3 },
+    ]);
+    expect(sentInputs(transport)).toEqual([]);
+    expect(client.diagnostics()).toMatchObject({
+      pendingCount: before.pendingCount,
+      lastSentSequence: before.lastSentSequence,
+      lastAcknowledgedSequence: before.lastAcknowledgedSequence,
+    });
+    client.dispose();
+  });
+
+  it("does not send while disconnected, awaiting a baseline, hidden, or disposed", () => {
+    const transport = new FakeTransport();
+    const client = new PredictionClient({
+      url: "ws://test",
+      transportFactory: () => transport,
+      sampleIntent: () => ({ moveX: 0, moveZ: 0, jump: false }),
+      autoSchedule: false,
+    });
+    expect(client.useAbility(2)).toBe(false);
+    client.connect();
+    expect(client.useAbility(2)).toBe(false);
+    transport.open();
+    expect(client.useAbility(2)).toBe(false);
+    transport.receive(welcome());
+    client.setVisible(false);
+    expect(client.useAbility(2)).toBe(false);
+    client.setVisible(true);
+    client.dispose();
+    expect(client.useAbility(2)).toBe(false);
+    expect(sentAbilities(transport)).toEqual([]);
+  });
+
+  it("accepts baseline combat world state and replaces it only with a newer same-epoch snapshot", () => {
+    const { client, transport } = setup();
+    expect(client.combatState()).toEqual({
+      player: { classId: "dancer", buffs: [], globalCooldownEndsAtTick: 0 },
+      boss: initialBoss,
+      projectiles: [initialProjectile],
+    });
+
+    const player = client.predictedState()!;
+    const nextBoss = { ...initialBoss, health: 475, stateRevision: 1 };
+    const nextProjectile = { ...initialProjectile, projectileId: "projectile-2", spawnedAtTick: 61 };
+    transport.receive({ ...snapshot(player, 5), boss: nextBoss, projectiles: [nextProjectile] });
+    expect(client.combatState()).toMatchObject({ boss: nextBoss, projectiles: [nextProjectile] });
+
+    transport.receive({ ...snapshot(player, 5), boss: initialBoss, projectiles: [] });
+    transport.receive({ ...snapshot(player, 99, "wrong-epoch"), boss: initialBoss, projectiles: [] });
+    expect(client.combatState()).toMatchObject({ boss: nextBoss, projectiles: [nextProjectile] });
+    client.dispose();
+  });
+
+  it("applies a valid result only to local combat copies and delivers feedback once", () => {
+    const transport = new FakeTransport();
+    const feedback: AbilityResultMessage[] = [];
+    const client = new PredictionClient({
+      url: "ws://test",
+      transportFactory: () => transport,
+      sampleIntent: () => ({ moveX: 0, moveZ: 0, jump: false }),
+      autoSchedule: false,
+      onAbilityResult: (result) => feedback.push(result),
+    });
+    client.connect();
+    transport.open();
+    transport.receive(welcome());
+    const before = client.predictedState()!;
+    const combat = {
+      classId: "dancer" as const,
+      buffs: [{ buffId: "dancer_3_ready", stacks: 1 }],
+      globalCooldownEndsAtTick: 210,
+    };
+    expect(client.useAbility(2)).toBe(true);
+    const result = abilityResult(1, combat);
+    transport.receive(result);
+    transport.receive(result);
+    transport.receive(abilityResult(1, {
+      classId: "dancer",
+      buffs: [],
+      globalCooldownEndsAtTick: 0,
+    }, "wrong-epoch"));
+
+    const after = client.predictedState()!;
+    expect({ ...after, combat: before.combat }).toEqual(before);
+    expect(after.combat).toEqual(combat);
+    expect(client.renderedState()?.combat).toEqual(combat);
+    expect(client.latestSnapshotPlayers()[0]?.combat).toEqual(combat);
+    expect(feedback).toEqual([result]);
+    expect(client.useAbility(3)).toBe(false);
+    client.dispose();
+  });
+
+  it("uses conservative recovery for an impossible future result", () => {
+    const { client, transport } = setup();
+    transport.receive(abilityResult(1, {
+      classId: "dancer",
+      buffs: [],
+      globalCooldownEndsAtTick: 0,
+    }));
+    expect(client.diagnostics()).toMatchObject({ connection: "resyncing", pendingCount: 0 });
+    expect(client.combatState()).toEqual({ player: undefined, boss: undefined, projectiles: [] });
+    client.dispose();
+  });
+
+  it("returns defensive copies of player, boss, and projectile combat state", () => {
+    const { client } = setup();
+    const first = client.combatState();
+    first.player!.buffs.push({ buffId: "mutated", stacks: 1 });
+    first.boss!.position.x = 999;
+    first.projectiles[0]!.position.y = 999;
+    expect(client.combatState()).toEqual({
+      player: { classId: "dancer", buffs: [], globalCooldownEndsAtTick: 0 },
+      boss: initialBoss,
+      projectiles: [initialProjectile],
+    });
+    client.dispose();
+  });
+});
+
 describe("bounded recovery and lifecycle", () => {
   it("resyncs without committing prediction or sequence state when an input send fails", () => {
     const { client, transport, setNow } = setup();
@@ -275,6 +461,8 @@ describe("bounded recovery and lifecycle", () => {
       snapshotSequence: 5,
       serverTick: 63,
       players: [local, remote],
+      boss: initialBoss,
+      projectiles: [initialProjectile],
     });
     expect([...client.renderedRemoteStates(100).keys()]).toEqual(["remote"]);
     expect(client.renderedRemoteStates(100).has("local")).toBe(false);
@@ -287,6 +475,8 @@ describe("bounded recovery and lifecycle", () => {
       snapshotSequence: 6,
       serverTick: 66,
       players: [local],
+      boss: initialBoss,
+      projectiles: [],
     });
     expect(client.renderedRemoteStates(150).size).toBe(0);
     transport.disconnect();
@@ -331,10 +521,13 @@ describe("bounded recovery and lifecycle", () => {
     const first = created[0]!;
     first.open();
     first.receive(welcome());
+    expect(client.useAbility(2)).toBe(true);
+    expect(sentAbilities(first)[0]?.requestId).toBe(1);
     now = 20;
     client.advance(now);
     first.disconnect();
     expect(client.predictedState()).toBeUndefined();
+    expect(client.combatState()).toEqual({ player: undefined, boss: undefined, projectiles: [] });
     expect(client.diagnostics().pendingCount).toBe(0);
     timeouts.shift()?.();
     const second = created[1]!;
@@ -344,6 +537,8 @@ describe("bounded recovery and lifecycle", () => {
     second.receive(welcome(createInitialPlayerState({ playerId: "new-local" }), "epoch-2"));
     expect(client.diagnostics().localPlayerId).toBe("new-local");
     expect(client.diagnostics().lastSentSequence).toBe(0);
+    expect(client.useAbility(2)).toBe(true);
+    expect(sentAbilities(second)[0]?.requestId).toBe(1);
     client.dispose();
   });
 

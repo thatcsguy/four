@@ -1,4 +1,4 @@
-import { CAMERA_CONSTANTS } from "@four/shared";
+import { CAMERA_CONSTANTS, type AbilitySlot } from "@four/shared";
 
 export interface MovementIntentSnapshot {
   readonly moveX: number;
@@ -51,6 +51,26 @@ const NEUTRAL_GAMEPAD: GamepadState = {
 // Leave a tiny margin inside the protocol's unit circle. Normalizing to exactly
 // one can round moveX² + moveZ² above one for some camera yaw values.
 const MAX_NORMALIZED_MOVEMENT = 1 - 1e-12;
+const MAX_ABILITY_PRESS_QUEUE = 16;
+
+const ABILITY_SLOT_BY_CODE: Readonly<Partial<Record<string, AbilitySlot>>> = {
+  Digit1: 1,
+  Digit2: 2,
+  Digit3: 3,
+  Digit4: 4,
+};
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (target === null) {
+    return false;
+  }
+  const candidate = target as EventTarget & { readonly tagName?: string; readonly isContentEditable?: boolean };
+  const tagName = candidate.tagName?.toLowerCase();
+  return tagName === "input"
+    || tagName === "textarea"
+    || tagName === "select"
+    || candidate.isContentEditable === true;
+}
 
 function activeAxis(value: number): number {
   return Number.isFinite(value) && Math.abs(value) > CAMERA_CONSTANTS.gamepadDeadzone ? value : 0;
@@ -98,6 +118,7 @@ export function combineMovementSources(
 
 export class InputController {
   private readonly heldKeys = new Set<string>();
+  private readonly abilityPresses: AbilitySlot[] = [];
   private readonly windowTarget: EventTarget;
   private readonly documentTarget: InputDocument;
   private readonly getGamepads: () => ArrayLike<Gamepad | null>;
@@ -163,9 +184,15 @@ export class InputController {
     return snapshot;
   }
 
+  /** Returns queued, ordered action edges and clears them from the controller. */
+  consumeAbilityPresses(): AbilitySlot[] {
+    return this.abilityPresses.splice(0);
+  }
+
   /** Clears held device state when a network epoch or baseline is abandoned. */
   reset(): void {
     this.clearHeldInput();
+    this.abilityPresses.length = 0;
     this.wheelSteps = 0;
     this.releasePointerLock();
   }
@@ -189,7 +216,22 @@ export class InputController {
   }
 
   private readonly onKeyDown = (event: Event): void => {
-    const code = (event as KeyboardEvent).code;
+    const keyboardEvent = event as KeyboardEvent;
+    const code = keyboardEvent.code;
+    const abilitySlot = ABILITY_SLOT_BY_CODE[code];
+    if (abilitySlot !== undefined) {
+      if (
+        event.defaultPrevented
+        || keyboardEvent.repeat
+        || isEditableTarget(event.target)
+        || this.abilityPresses.length >= MAX_ABILITY_PRESS_QUEUE
+      ) {
+        return;
+      }
+      this.abilityPresses.push(abilitySlot);
+      event.preventDefault();
+      return;
+    }
     if (code === "KeyW" || code === "KeyA" || code === "KeyS" || code === "KeyD" || code === "Space") {
       this.heldKeys.add(code);
       event.preventDefault();
@@ -251,7 +293,10 @@ export class InputController {
 
   private readonly preventDefault = (event: Event): void => event.preventDefault();
 
-  private readonly onBlur = (): void => this.clearHeldInput();
+  private readonly onBlur = (): void => {
+    this.clearHeldInput();
+    this.abilityPresses.length = 0;
+  };
 
   private readonly onPointerLockChange = (): void => {
     if (this.documentTarget.pointerLockElement !== this.canvas) {

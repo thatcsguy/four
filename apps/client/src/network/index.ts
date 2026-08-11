@@ -1,6 +1,7 @@
 export { PredictionClient } from "./prediction-client.js";
 export type {
   ConnectionState,
+  ClientCombatState,
   PredictionClientOptions,
   PredictionDiagnostics,
 } from "./prediction-client.js";

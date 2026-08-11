@@ -4,9 +4,12 @@ import {
   FIXED_DELTA_SECONDS,
   MAX_ACTIVE_PLAYERS,
   PROTOCOL_VERSION,
+  COMBAT_CONSTANTS,
   decodeServerMessage,
   encodeClientMessage,
   type InputMessage,
+  type AbilityUseMessage,
+  type AbilityResultMessage,
   type ServerMessage,
   type SnapshotMessage,
   type WelcomeMessage,
@@ -40,11 +43,19 @@ describe("authoritative WebSocket server", () => {
   let now: number;
   let server: GameServer;
   let url: string;
+  let randomRolls: number[];
   const clients: TestClient[] = [];
 
   beforeEach(async () => {
     now = 10_000;
-    server = new GameServer({ autoTick: false, now: () => now, logger: silentLogger });
+    randomRolls = [];
+    server = new GameServer({
+      autoTick: false,
+      initialBossHealth: 500,
+      now: () => now,
+      logger: silentLogger,
+      random: () => randomRolls.shift() ?? 0.75,
+    });
     url = (await server.start()).url;
   });
 
@@ -113,6 +124,22 @@ describe("authoritative WebSocket server", () => {
       moveX: 1,
       moveZ: 0,
       jump: false,
+      ...overrides,
+    };
+  }
+
+  function ability(
+    baseline: WelcomeMessage,
+    requestId: number,
+    slot: AbilityUseMessage["slot"],
+    overrides: Partial<AbilityUseMessage> = {},
+  ): AbilityUseMessage {
+    return {
+      type: "ability_use",
+      protocolVersion: PROTOCOL_VERSION,
+      epoch: baseline.epoch,
+      requestId,
+      slot,
       ...overrides,
     };
   }
@@ -314,5 +341,182 @@ describe("authoritative WebSocket server", () => {
     const player = snapshot.players.find((state) => state.playerId === newWelcome.playerId);
     expect(player?.lastProcessedInputSequence).toBe(0);
     expect(player?.position).toEqual(newWelcome.baseline.players[0]?.position);
+  });
+
+  it("defaults players to Dancer and executes the guaranteed 2,3 loop", async () => {
+    const client = await connect();
+    const baseline = await welcome(client);
+    expect(baseline.baseline.players[0]?.combat).toEqual({
+      classId: "dancer",
+      buffs: [],
+      globalCooldownEndsAtTick: 0,
+    });
+    expect(baseline.baseline.boss).toMatchObject({ bossId: "gloop", health: 500, maxHealth: 50_000 });
+    expect(baseline.baseline.projectiles).toEqual([]);
+
+    for (const [index, slot] of [2, 3, 2, 3].entries()) {
+      if (index > 0) pumpTicks(COMBAT_CONSTANTS.dancerGlobalCooldownTicks);
+      const requestId = index + 1;
+      client.socket.send(encodeClientMessage(ability(baseline, requestId, slot as 2 | 3)));
+      await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+      pumpTicks(1);
+      const result = await client.next((message): message is AbilityResultMessage =>
+        message.type === "ability_result" && message.requestId === requestId);
+      expect(result.accepted).toBe(true);
+    }
+    expect(server.diagnostics().activeProjectiles).toBeGreaterThan(0);
+  });
+
+  it("uses deterministic rolls for gated slot 1 and slot 4 procs", async () => {
+    randomRolls.push(0.25, 0.75, 0.75, 0.25, 0.75);
+    const client = await connect();
+    const baseline = await welcome(client);
+
+    for (const [requestId, slot] of [[1, 2], [2, 1], [3, 2], [4, 3], [5, 4]] as const) {
+      if (requestId > 1) pumpTicks(COMBAT_CONSTANTS.dancerGlobalCooldownTicks);
+      client.socket.send(encodeClientMessage(ability(baseline, requestId, slot)));
+      await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+      pumpTicks(1);
+      const result = await client.next((message): message is AbilityResultMessage =>
+        message.type === "ability_result" && message.requestId === requestId);
+      expect(result.accepted).toBe(true);
+      if (requestId === 5) expect(result.combat.buffs).toEqual([]);
+    }
+  });
+
+  it("rejects unavailable, stale, and gapped abilities without spawning or mutating", async () => {
+    const client = await connect();
+    const baseline = await welcome(client);
+    client.socket.send(encodeClientMessage(ability(baseline, 1, 1)));
+    await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+    pumpTicks(1);
+    await expect(client.next((message) => message.type === "ability_result" && message.requestId === 1))
+      .resolves.toMatchObject({ accepted: false, reason: "missing_buff", combat: { buffs: [] } });
+    expect(server.diagnostics().activeProjectiles).toBe(0);
+
+    client.socket.send(encodeClientMessage(ability(baseline, 1, 2)));
+    client.socket.send(encodeClientMessage(ability(baseline, 3, 2)));
+    await waitFor(() => client.messages.filter((message) =>
+      message.type === "ability_result" && message.reason === "stale_request").length === 2);
+    expect(server.diagnostics().abilityQueueLengths[0]).toBe(0);
+
+    client.socket.send(encodeClientMessage(ability(baseline, 2, 2)));
+    await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+    pumpTicks(1);
+    expect(server.diagnostics().activeProjectiles).toBe(1);
+  });
+
+  it("enforces the 2.5 second Dancer global cooldown without consuming buffs or RNG", async () => {
+    randomRolls.push(0, 0.75);
+    const client = await connect();
+    const baseline = await welcome(client);
+
+    client.socket.send(encodeClientMessage(ability(baseline, 1, 2)));
+    await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+    pumpTicks(1);
+    const opening = await client.next((message): message is AbilityResultMessage =>
+      message.type === "ability_result" && message.requestId === 1);
+    expect(opening).toMatchObject({ accepted: true, reason: "accepted" });
+    expect(opening.combat.globalCooldownEndsAtTick).toBe(COMBAT_CONSTANTS.dancerGlobalCooldownTicks + 1);
+
+    client.socket.send(encodeClientMessage(ability(baseline, 2, 3)));
+    await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+    pumpTicks(1);
+    const early = await client.next((message): message is AbilityResultMessage =>
+      message.type === "ability_result" && message.requestId === 2);
+    expect(early).toMatchObject({
+      accepted: false,
+      reason: "global_cooldown",
+      combat: { buffs: opening.combat.buffs },
+    });
+    expect(randomRolls).toEqual([0.75]);
+
+    pumpTicks(COMBAT_CONSTANTS.dancerGlobalCooldownTicks);
+    client.socket.send(encodeClientMessage(ability(baseline, 3, 3)));
+    await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+    pumpTicks(1);
+    await expect(client.next((message) => message.type === "ability_result" && message.requestId === 3))
+      .resolves.toMatchObject({ accepted: true, reason: "accepted" });
+  });
+
+  it("spawns owned projectiles, converges snapshots, and damages Gloop once", async () => {
+    const first = await connect();
+    const firstWelcome = await welcome(first);
+    first.socket.send(encodeClientMessage(ability(firstWelcome, 1, 2)));
+    await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+    pumpTicks(1);
+    const result = await first.next((message): message is AbilityResultMessage => message.type === "ability_result");
+    expect(result).toMatchObject({ accepted: true, reason: "accepted", slot: 2 });
+    expect(server.diagnostics().activeProjectiles).toBe(1);
+
+    const second = await connect();
+    const secondWelcome = await welcome(second);
+    expect(secondWelcome.baseline.projectiles).toHaveLength(1);
+    expect(secondWelcome.baseline.projectiles[0]).toMatchObject({
+      ownerPlayerId: firstWelcome.playerId,
+      abilityId: "dancer_2",
+      targetId: "gloop",
+      damage: 10,
+      speed: COMBAT_CONSTANTS.projectile.speed,
+      spawnedAtTick: 1,
+    });
+
+    pumpTicks(2);
+    const snapshots = await Promise.all([first, second].map((client) => client.next(
+      (message): message is SnapshotMessage => message.type === "snapshot" && message.serverTick >= 3,
+    )));
+    expect(snapshots[0]?.boss).toEqual(snapshots[1]?.boss);
+    expect(snapshots[0]?.projectiles).toEqual(snapshots[1]?.projectiles);
+    expect(snapshots[0]?.boss.health).toBe(490);
+    expect(snapshots[0]?.boss.stateRevision).toBe(1);
+  });
+
+  it("keeps fired projectiles after disconnecting their owner", async () => {
+    const client = await connect();
+    const baseline = await welcome(client);
+    client.socket.send(encodeClientMessage(ability(baseline, 1, 2)));
+    await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+    pumpTicks(1);
+    expect(server.diagnostics().activeProjectiles).toBe(1);
+    client.socket.close();
+    await waitFor(() => server.diagnostics().activePlayers === 0);
+    expect(server.diagnostics().activeProjectiles).toBe(1);
+    pumpTicks(2);
+    expect(server.diagnostics().bossHealth).toBe(490);
+  });
+
+  it("clamps a defeated boss at zero and rejects new uses", async () => {
+    randomRolls.push(...Array.from({ length: 40 }, () => 0));
+    const client = await connect();
+    const baseline = await welcome(client);
+    let requestId = 0;
+    for (let cycle = 0; cycle < 7; cycle += 1) {
+      for (const slot of [2, 1, 3, 4] as const) {
+        if (requestId > 0) pumpTicks(COMBAT_CONSTANTS.dancerGlobalCooldownTicks);
+        requestId += 1;
+        client.socket.send(encodeClientMessage(ability(baseline, requestId, slot)));
+        await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+        pumpTicks(1);
+        await client.next((message) => message.type === "ability_result" && message.requestId === requestId);
+      }
+    }
+    pumpTicks(2);
+    expect(server.diagnostics().bossHealth).toBe(10);
+
+    pumpTicks(COMBAT_CONSTANTS.dancerGlobalCooldownTicks);
+    requestId += 1;
+    client.socket.send(encodeClientMessage(ability(baseline, requestId, 2)));
+    await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+    pumpTicks(2);
+    expect(server.diagnostics().bossHealth).toBe(0);
+
+    requestId += 1;
+    client.socket.send(encodeClientMessage(ability(baseline, requestId, 2)));
+    await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+    pumpTicks(1);
+    await expect(client.next((message) => message.type === "ability_result" && message.requestId === requestId))
+      .resolves.toMatchObject({ accepted: false, reason: "boss_defeated" });
+    expect(server.diagnostics().bossHealth).toBe(0);
+    expect(server.diagnostics().activeProjectiles).toBe(0);
   });
 });

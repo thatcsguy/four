@@ -5,6 +5,7 @@ import { extname, join, normalize, resolve, sep } from "node:path";
 
 import {
   COMMAND_HZ,
+  COMBAT_CONSTANTS,
   FIXED_DELTA_SECONDS,
   PROTOCOL_VERSION,
   SIMULATION_HZ,
@@ -12,11 +13,18 @@ import {
   createInitialPlayerState,
   decodeClientMessage,
   encodeServerMessage,
+  isAbilityOnGlobalCooldown,
+  resolveAbilityUse,
   stepPlayer,
+  type AbilityResultMessage,
+  type AbilityUseMessage,
   type AuthoritativePlayerState,
+  type BossState,
   type InputMessage,
   type MovementInput,
+  type PlayerCombatState,
   type ProtocolErrorMessage,
+  type ProjectileState,
   type ServerMessage,
 } from "@four/shared";
 import WebSocket, { WebSocketServer, type RawData } from "ws";
@@ -24,6 +32,7 @@ import WebSocket, { WebSocketServer, type RawData } from "ws";
 import {
   FIXED_STEP_MS,
   MAX_CATCH_UP_STEPS,
+  MAX_ABILITY_QUEUE_LENGTH,
   MAX_INPUT_QUEUE_LENGTH,
   MAX_MESSAGE_BYTES,
   MAX_MESSAGES_PER_SECOND,
@@ -33,6 +42,12 @@ import {
   SNAPSHOT_INTERVAL_TICKS,
   SPAWN_POINTS,
 } from "./config.js";
+import {
+  advanceCombat,
+  copyBoss,
+  copyProjectile,
+  createInitialBossState,
+} from "./combat-simulation.js";
 
 const NEUTRAL_INPUT: MovementInput = Object.freeze({ moveX: 0, moveZ: 0, jump: false });
 
@@ -51,6 +66,9 @@ export interface GameServerOptions {
   now?: () => number;
   logger?: ServerLogger;
   productionClientDirectory?: string;
+  random?: () => number;
+  /** Test fixture override; production defaults to the shared boss maximum. */
+  initialBossHealth?: number;
 }
 
 interface PlayerConnection {
@@ -60,6 +78,8 @@ interface PlayerConnection {
   spawnIndex: number;
   state: AuthoritativePlayerState;
   inputQueue: InputMessage[];
+  abilityQueue: AbilityUseMessage[];
+  lastAbilityRequestId: number;
   lastReceivedSequence: number;
   lastAppliedInput: MovementInput;
   missingInputTicks: number;
@@ -79,6 +99,9 @@ export interface ServerDiagnostics {
   snapshotSequence: number;
   activePlayers: number;
   queueLengths: number[];
+  abilityQueueLengths: number[];
+  bossHealth: number;
+  activeProjectiles: number;
   lastPumpSteps: number;
 }
 
@@ -92,11 +115,13 @@ const contentTypes: Readonly<Record<string, string>> = {
 };
 
 export class GameServer {
-  private readonly options: Required<Pick<GameServerOptions, "host" | "autoTick" | "now" | "logger">> & GameServerOptions;
+  private readonly options: Required<Pick<GameServerOptions, "host" | "autoTick" | "now" | "logger" | "random">> & GameServerOptions;
   private readonly httpServer: HttpServer;
   private readonly webSocketServer: WebSocketServer;
   private readonly players = new Map<WebSocket, PlayerConnection>();
   private readonly occupiedSpawns = new Set<number>();
+  private boss: BossState;
+  private projectiles = new Map<string, ProjectileState>();
   private timer: NodeJS.Timeout | undefined;
   private lastClockMs = 0;
   private accumulatorMs = 0;
@@ -106,12 +131,19 @@ export class GameServer {
   private lastPumpSteps = 0;
 
   public constructor(options: GameServerOptions = {}) {
+    const initialBoss = createInitialBossState();
+    const initialBossHealth = options.initialBossHealth ?? initialBoss.maxHealth;
+    if (!Number.isFinite(initialBossHealth) || initialBossHealth < 0 || initialBossHealth > initialBoss.maxHealth) {
+      throw new RangeError("initialBossHealth must be finite and between zero and max health");
+    }
+    this.boss = { ...initialBoss, health: initialBossHealth };
     this.options = {
       ...options,
       host: options.host ?? "127.0.0.1",
       autoTick: options.autoTick ?? true,
       now: options.now ?? (() => performance.now()),
       logger: options.logger ?? console,
+      random: options.random ?? (() => randomInt(0x1_0000_0000) / 0x1_0000_0000),
     };
     this.httpServer = createServer((request, response) => this.handleHttp(request, response));
     this.webSocketServer = new WebSocketServer({
@@ -171,6 +203,9 @@ export class GameServer {
       snapshotSequence: this.snapshotSequence,
       activePlayers: this.players.size,
       queueLengths: [...this.players.values()].map((player) => player.inputQueue.length),
+      abilityQueueLengths: [...this.players.values()].map((player) => player.abilityQueue.length),
+      bossHealth: this.boss.health,
+      activeProjectiles: this.projectiles.size,
       lastPumpSteps: this.lastPumpSteps,
     };
   }
@@ -242,6 +277,8 @@ export class GameServer {
       spawnIndex,
       state: createInitialPlayerState({ playerId, displayName, position: spawn }),
       inputQueue: [],
+      abilityQueue: [],
+      lastAbilityRequestId: 0,
       lastReceivedSequence: 0,
       lastAppliedInput: NEUTRAL_INPUT,
       missingInputTicks: MISSING_INPUT_GRACE_TICKS,
@@ -265,6 +302,8 @@ export class GameServer {
         snapshotSequence: this.snapshotSequence,
         serverTick: this.serverTick,
         players: this.playerStates(),
+        boss: copyBoss(this.boss),
+        projectiles: this.projectileStates(),
       },
     });
     this.options.logger.info(`connected player=${playerId} name=${displayName} epoch=${epoch} spawn=${spawnIndex}`);
@@ -319,7 +358,32 @@ export class GameServer {
       });
       return;
     }
+    if (decoded.data.type === "ability_use") {
+      this.acceptAbilityRequest(player, decoded.data);
+      return;
+    }
     this.acceptInput(player, decoded.data);
+  }
+
+  private acceptAbilityRequest(player: PlayerConnection, request: AbilityUseMessage): void {
+    if (request.epoch !== player.epoch) {
+      this.sendProtocolError(player.socket, "invalid_message", "Ability epoch does not match this connection");
+      this.reject(player, `wrong ability epoch request=${request.requestId}`);
+      return;
+    }
+    const expectedRequestId = player.lastAbilityRequestId + 1;
+    if (request.requestId !== expectedRequestId) {
+      this.sendAbilityResult(player, request, false, "stale_request");
+      this.reject(player, `stale/gapped ability request=${request.requestId} expected=${expectedRequestId}`);
+      return;
+    }
+    if (player.abilityQueue.length >= MAX_ABILITY_QUEUE_LENGTH) {
+      this.sendAbilityResult(player, request, false, "invalid_request");
+      this.reject(player, `ability queue full request=${request.requestId}`);
+      return;
+    }
+    player.abilityQueue.push(request);
+    player.lastAbilityRequestId = request.requestId;
   }
 
   private acceptInput(player: PlayerConnection, input: InputMessage): void {
@@ -347,6 +411,10 @@ export class GameServer {
   private simulateStep(): void {
     this.serverTick += 1;
     for (const player of this.players.values()) {
+      const ability = player.abilityQueue.shift();
+      if (ability !== undefined) this.processAbilityRequest(player, ability);
+    }
+    for (const player of this.players.values()) {
       const command = player.inputQueue.shift();
       let input: MovementInput;
       if (command !== undefined) {
@@ -371,9 +439,89 @@ export class GameServer {
         : { ...stepped, lastProcessedInputSequence: command.sequence };
     }
 
+    const combatStep = advanceCombat(
+      this.boss,
+      [...this.projectiles.values()],
+      FIXED_DELTA_SECONDS,
+    );
+    this.boss = combatStep.boss;
+    this.projectiles = new Map(combatStep.projectiles.map((projectile) => [projectile.projectileId, projectile]));
+
     if (this.serverTick % SNAPSHOT_INTERVAL_TICKS === 0) {
       this.broadcastSnapshot();
     }
+  }
+
+  private processAbilityRequest(player: PlayerConnection, request: AbilityUseMessage): void {
+    if (this.boss.health <= 0) {
+      this.sendAbilityResult(player, request, false, "boss_defeated");
+      return;
+    }
+    if (this.projectiles.size >= COMBAT_CONSTANTS.maxActiveProjectiles) {
+      this.sendAbilityResult(player, request, false, "invalid_request");
+      return;
+    }
+    const combatState = toCombatState(player.state.combat);
+    if (isAbilityOnGlobalCooldown(combatState, request.slot, this.serverTick)) {
+      this.sendAbilityResult(player, request, false, "global_cooldown");
+      return;
+    }
+
+    const roll = normalizeRandomRoll(this.options.random());
+    if (roll === undefined) {
+      this.options.logger.error("random source returned a non-finite value; ability rejected");
+      this.sendAbilityResult(player, request, false, "invalid_request");
+      return;
+    }
+    const resolution = resolveAbilityUse(combatState, request.slot, roll, this.serverTick);
+    if (!resolution.accepted) {
+      const reason = resolution.reason === "missing_buff"
+        ? "missing_buff"
+        : resolution.reason === "global_cooldown"
+          ? "global_cooldown"
+          : "invalid_request";
+      this.sendAbilityResult(player, request, false, reason);
+      return;
+    }
+
+    player.state = { ...player.state, combat: resolution.combatState };
+    const projectile: ProjectileState = {
+      projectileId: randomUUID(),
+      ownerPlayerId: player.playerId,
+      abilityId: resolution.ability.abilityId,
+      targetId: this.boss.bossId,
+      position: {
+        x: player.state.position.x,
+        y: player.state.position.y + COMBAT_CONSTANTS.projectile.spawnHeight,
+        z: player.state.position.z,
+      },
+      speed: COMBAT_CONSTANTS.projectile.speed,
+      damage: resolution.ability.damage,
+      spawnedAtTick: this.serverTick,
+    };
+    this.projectiles.set(projectile.projectileId, projectile);
+    this.sendAbilityResult(player, request, true, "accepted");
+  }
+
+  private sendAbilityResult(
+    player: PlayerConnection,
+    request: AbilityUseMessage,
+    accepted: boolean,
+    reason: AbilityResultMessage["reason"],
+  ): void {
+    this.send(player.socket, {
+      type: "ability_result",
+      protocolVersion: PROTOCOL_VERSION,
+      epoch: player.epoch,
+      requestId: request.requestId,
+      slot: request.slot,
+      accepted,
+      reason,
+      combat: {
+        ...player.state.combat,
+        buffs: player.state.combat.buffs.map((buff) => ({ ...buff })),
+      },
+    });
   }
 
   private broadcastSnapshot(): void {
@@ -387,12 +535,30 @@ export class GameServer {
         snapshotSequence: this.snapshotSequence,
         serverTick: this.serverTick,
         players,
+        boss: copyBoss(this.boss),
+        projectiles: this.projectileStates(),
       });
     }
   }
 
   private playerStates(): AuthoritativePlayerState[] {
-    return [...this.players.values()].map((player) => player.state);
+    return [...this.players.values()].map((player) => ({
+      ...player.state,
+      position: { ...player.state.position },
+      airborneVelocity: { ...player.state.airborneVelocity },
+      combat: { ...player.state.combat, buffs: player.state.combat.buffs.map((buff) => ({ ...buff })) },
+      control: {
+        ...player.state.control,
+        permissions: { ...player.state.control.permissions },
+        forcedMotion: player.state.control.forcedMotion === undefined
+          ? undefined
+          : { ...player.state.control.forcedMotion },
+      },
+    }));
+  }
+
+  private projectileStates(): ProjectileState[] {
+    return [...this.projectiles.values()].map(copyProjectile);
   }
 
   private allowMessage(player: PlayerConnection): boolean {
@@ -420,6 +586,7 @@ export class GameServer {
       return;
     }
     player.inputQueue.length = 0;
+    player.abilityQueue.length = 0;
     this.occupiedSpawns.delete(player.spawnIndex);
     this.options.logger.info(`disconnected player=${player.playerId} epoch=${player.epoch}`);
   }
@@ -484,6 +651,21 @@ export class GameServer {
     });
     createReadStream(filePath).pipe(response);
   }
+}
+
+function normalizeRandomRoll(value: number): number | undefined {
+  if (!Number.isFinite(value)) return undefined;
+  return ((value % 1) + 1) % 1;
+}
+
+function toCombatState(combat: AuthoritativePlayerState["combat"]): PlayerCombatState {
+  return {
+    classId: combat.classId,
+    globalCooldownEndsAtTick: combat.globalCooldownEndsAtTick,
+    buffs: combat.buffs.map((buff) => buff.expiresAtTick === undefined
+      ? { buffId: buff.buffId, stacks: buff.stacks }
+      : { buffId: buff.buffId, stacks: buff.stacks, expiresAtTick: buff.expiresAtTick }),
+  };
 }
 
 function dataByteLength(data: RawData): number {

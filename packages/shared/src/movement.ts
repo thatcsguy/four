@@ -1,4 +1,5 @@
 import { MOVEMENT_CONSTANTS } from "./constants.js";
+import { createInitialCombatState } from "./combat.js";
 import type { AuthoritativePlayerState, Vector3 } from "./protocol.js";
 
 export type SimulatedPlayerState = AuthoritativePlayerState;
@@ -72,6 +73,7 @@ export function createInitialPlayerState(spawn: Readonly<PlayerSpawn>): Simulate
     airborneVelocity: { x: 0, z: 0 },
     facingAngle: spawn.facingAngle ?? 0,
     speedModifier: 1,
+    combat: createInitialCombatState(),
     control: {
       mode: "normal",
       revision: 0,

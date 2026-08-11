@@ -7,6 +7,12 @@ import {
   SIMULATION_HZ,
   SNAPSHOT_HZ,
 } from "./constants.js";
+import {
+  ABILITY_SLOTS,
+  COMBAT_CONSTANTS,
+  DANCER_ABILITY_IDS,
+  PLAYER_CLASS_IDS,
+} from "./combat.js";
 
 const safeNonNegativeIntegerSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const finiteNumberSchema = z.number().finite();
@@ -61,6 +67,21 @@ export const controlStateSchema = z.object({
   }
 });
 
+export const buffStateSchema = z.object({
+  buffId: identifierSchema,
+  stacks: safeNonNegativeIntegerSchema.min(1).max(99),
+  expiresAtTick: safeNonNegativeIntegerSchema.optional(),
+}).strict();
+
+export const playerCombatStateSchema = z.object({
+  classId: z.enum(PLAYER_CLASS_IDS),
+  buffs: z.array(buffStateSchema).max(COMBAT_CONSTANTS.maxBuffsPerPlayer),
+  globalCooldownEndsAtTick: safeNonNegativeIntegerSchema,
+}).strict().refine(
+  (combat) => new Set(combat.buffs.map((buff) => buff.buffId)).size === combat.buffs.length,
+  { message: "buff IDs must be unique", path: ["buffs"] },
+);
+
 export const authoritativePlayerStateSchema = z.object({
   playerId: identifierSchema,
   displayName: z.string().min(1).max(24),
@@ -72,6 +93,7 @@ export const authoritativePlayerStateSchema = z.object({
   airborneVelocity: vector2Schema,
   facingAngle: finiteNumberSchema,
   speedModifier: finiteNumberSchema.nonnegative(),
+  combat: playerCombatStateSchema,
   control: controlStateSchema,
   stateRevision: safeNonNegativeIntegerSchema,
   lastProcessedInputSequence: safeNonNegativeIntegerSchema,
@@ -97,6 +119,14 @@ export const inputMessageSchema = z.object({
   path: ["moveX"],
 });
 
+export const abilityUseMessageSchema = z.object({
+  type: z.literal("ability_use"),
+  protocolVersion: versionSchema,
+  epoch: epochSchema,
+  requestId: safeNonNegativeIntegerSchema,
+  slot: z.union(ABILITY_SLOTS.map((slot) => z.literal(slot))),
+}).strict();
+
 export const pingMessageSchema = z.object({
   type: z.literal("ping"),
   protocolVersion: versionSchema,
@@ -106,6 +136,7 @@ export const pingMessageSchema = z.object({
 
 export const clientMessageSchema = z.discriminatedUnion("type", [
   inputMessageSchema,
+  abilityUseMessageSchema,
   pingMessageSchema,
 ]);
 
@@ -115,10 +146,36 @@ const ratesSchema = z.object({
   snapshotHz: z.literal(SNAPSHOT_HZ),
 }).strict();
 
-const baselineSchema = z.object({
+export const bossStateSchema = z.object({
+  bossId: identifierSchema,
+  name: z.string().min(1).max(64),
+  health: finiteNumberSchema.nonnegative(),
+  maxHealth: finiteNumberSchema.positive(),
+  position: vector3Schema,
+  hitRadius: finiteNumberSchema.positive(),
+  stateRevision: safeNonNegativeIntegerSchema,
+}).strict().refine((boss) => boss.health <= boss.maxHealth, {
+  message: "health must not exceed maxHealth",
+  path: ["health"],
+});
+
+export const projectileStateSchema = z.object({
+  projectileId: identifierSchema,
+  ownerPlayerId: identifierSchema,
+  abilityId: z.enum(DANCER_ABILITY_IDS),
+  targetId: identifierSchema,
+  position: vector3Schema,
+  speed: finiteNumberSchema.positive(),
+  damage: finiteNumberSchema.nonnegative(),
+  spawnedAtTick: safeNonNegativeIntegerSchema,
+}).strict();
+
+export const baselineSchema = z.object({
   snapshotSequence: safeNonNegativeIntegerSchema,
   serverTick: safeNonNegativeIntegerSchema,
   players: z.array(authoritativePlayerStateSchema).max(MAX_ACTIVE_PLAYERS),
+  boss: bossStateSchema,
+  projectiles: z.array(projectileStateSchema).max(COMBAT_CONSTANTS.maxActiveProjectiles),
 }).strict();
 
 export const welcomeMessageSchema = z.object({
@@ -140,7 +197,35 @@ export const snapshotMessageSchema = z.object({
   snapshotSequence: safeNonNegativeIntegerSchema,
   serverTick: safeNonNegativeIntegerSchema,
   players: z.array(authoritativePlayerStateSchema).max(MAX_ACTIVE_PLAYERS),
+  boss: bossStateSchema,
+  projectiles: z.array(projectileStateSchema).max(COMBAT_CONSTANTS.maxActiveProjectiles),
 }).strict();
+
+export const abilityResultMessageSchema = z.object({
+  type: z.literal("ability_result"),
+  protocolVersion: versionSchema,
+  epoch: epochSchema,
+  requestId: safeNonNegativeIntegerSchema,
+  slot: z.union(ABILITY_SLOTS.map((slot) => z.literal(slot))),
+  accepted: z.boolean(),
+  reason: z.enum([
+    "accepted",
+    "missing_buff",
+    "global_cooldown",
+    "boss_defeated",
+    "stale_request",
+    "invalid_request",
+  ]),
+  combat: playerCombatStateSchema,
+}).strict().superRefine((result, context) => {
+  if (result.accepted !== (result.reason === "accepted")) {
+    context.addIssue({
+      code: "custom",
+      message: "accepted must be true exactly when reason is accepted",
+      path: ["accepted"],
+    });
+  }
+});
 
 export const pongMessageSchema = z.object({
   type: z.literal("pong"),
@@ -166,6 +251,7 @@ export const protocolErrorMessageSchema = z.object({
 export const serverMessageSchema = z.discriminatedUnion("type", [
   welcomeMessageSchema,
   snapshotMessageSchema,
+  abilityResultMessageSchema,
   pongMessageSchema,
   serverFullMessageSchema,
   protocolErrorMessageSchema,
@@ -178,10 +264,14 @@ export type ForcedMotion = z.infer<typeof forcedMotionSchema>;
 export type ControlState = z.infer<typeof controlStateSchema>;
 export type AuthoritativePlayerState = z.infer<typeof authoritativePlayerStateSchema>;
 export type InputMessage = z.infer<typeof inputMessageSchema>;
+export type AbilityUseMessage = z.infer<typeof abilityUseMessageSchema>;
 export type PingMessage = z.infer<typeof pingMessageSchema>;
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
 export type WelcomeMessage = z.infer<typeof welcomeMessageSchema>;
 export type SnapshotMessage = z.infer<typeof snapshotMessageSchema>;
+export type AbilityResultMessage = z.infer<typeof abilityResultMessageSchema>;
+export type BossState = z.infer<typeof bossStateSchema>;
+export type ProjectileState = z.infer<typeof projectileStateSchema>;
 export type PongMessage = z.infer<typeof pongMessageSchema>;
 export type ServerFullMessage = z.infer<typeof serverFullMessageSchema>;
 export type ProtocolErrorMessage = z.infer<typeof protocolErrorMessageSchema>;

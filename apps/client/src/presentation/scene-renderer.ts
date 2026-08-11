@@ -1,9 +1,15 @@
-import { CAMERA_CONSTANTS } from "@four/shared";
+import {
+  CAMERA_CONSTANTS,
+  COMBAT_CONSTANTS,
+  type BossState,
+  type ProjectileState,
+} from "@four/shared";
 import * as THREE from "three";
 
 import { createArena } from "./arena.js";
 import { CharacterVisual } from "./character-visual.js";
-import { BossVisual } from "./boss-visual.js";
+import { BossVisual, DEFAULT_BOSS_STATE } from "./boss-visual.js";
+import { ProjectileVisualManager } from "./projectile-visual.js";
 import { StatusView, type StatusContent } from "./status-view.js";
 import {
   playerColorForIndex,
@@ -25,6 +31,13 @@ export interface SceneRenderer {
   upsertPlayer(state: PlayerRenderState): void;
   removePlayer(id: string): void;
   clearPlayers(): void;
+  setBossState(boss: Readonly<BossState>): void;
+  setProjectiles(
+    projectiles: readonly Readonly<ProjectileState>[],
+    serverTick: number,
+    nowMilliseconds: number,
+  ): void;
+  clearProjectiles(): void;
   setStatus(content: StatusContent): void;
   onFrame(listener: RenderFrameListener): () => void;
   renderOnce(deltaSeconds?: number): void;
@@ -56,6 +69,12 @@ export function createSceneRenderer(root: HTMLElement): SceneRenderer {
   scene.add(createArena());
   const boss = new BossVisual();
   scene.add(boss.root);
+  const projectileVisuals = new ProjectileVisualManager(scene);
+  const bossAimPoint = new THREE.Vector3(
+    DEFAULT_BOSS_STATE.position.x + COMBAT_CONSTANTS.boss.aimPoint.x,
+    DEFAULT_BOSS_STATE.position.y + COMBAT_CONSTANTS.boss.aimPoint.y,
+    DEFAULT_BOSS_STATE.position.z + COMBAT_CONSTANTS.boss.aimPoint.z,
+  );
 
   const camera = new THREE.PerspectiveCamera(
     CAMERA_CONSTANTS.verticalFovDegrees,
@@ -115,6 +134,7 @@ export function createSceneRenderer(root: HTMLElement): SceneRenderer {
       visual.update(deltaSeconds);
     }
     boss.update(deltaSeconds);
+    projectileVisuals.update(frame.nowMilliseconds, bossAimPoint);
     renderer.render(scene, camera);
   }
 
@@ -185,6 +205,20 @@ export function createSceneRenderer(root: HTMLElement): SceneRenderer {
       }
       colorIndices.clear();
     },
+    setBossState(state): void {
+      boss.setState(state);
+      bossAimPoint.set(
+        state.position.x + COMBAT_CONSTANTS.boss.aimPoint.x,
+        state.position.y + COMBAT_CONSTANTS.boss.aimPoint.y,
+        state.position.z + COMBAT_CONSTANTS.boss.aimPoint.z,
+      );
+    },
+    setProjectiles(projectiles, serverTick, nowMilliseconds): void {
+      projectileVisuals.setProjectiles(projectiles, serverTick, nowMilliseconds);
+    },
+    clearProjectiles(): void {
+      projectileVisuals.clear();
+    },
     setStatus(content): void {
       status.set(content);
     },
@@ -206,6 +240,7 @@ export function createSceneRenderer(root: HTMLElement): SceneRenderer {
       for (const visual of players.values()) {
         visual.dispose();
       }
+      projectileVisuals.dispose();
       boss.dispose();
       players.clear();
       colorIndices.clear();

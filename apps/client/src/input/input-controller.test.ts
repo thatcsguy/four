@@ -122,6 +122,57 @@ describe("movement input", () => {
   });
 });
 
+describe("ability input", () => {
+  it("maps top-row digits to ordered, one-shot ability presses", () => {
+    const { windowTarget, input } = setup();
+    for (const code of ["Digit2", "Digit4", "Digit1", "Digit3"]) {
+      const keydown = event("keydown", { code, repeat: false });
+      windowTarget.dispatchEvent(keydown);
+      expect(keydown.defaultPrevented).toBe(true);
+    }
+    windowTarget.dispatchEvent(event("keydown", { code: "Numpad2", repeat: false }));
+    expect(input.consumeAbilityPresses()).toEqual([2, 4, 1, 3]);
+    expect(input.consumeAbilityPresses()).toEqual([]);
+  });
+
+  it("suppresses repeats, handled events, and editable targets", () => {
+    const { windowTarget, input } = setup();
+    windowTarget.dispatchEvent(event("keydown", { code: "Digit1", repeat: true }));
+    const handled = event("keydown", { code: "Digit2", repeat: false });
+    handled.preventDefault();
+    windowTarget.dispatchEvent(handled);
+    for (const target of [
+      { tagName: "INPUT" },
+      { tagName: "textarea" },
+      { tagName: "SELECT" },
+      { tagName: "div", isContentEditable: true },
+    ]) {
+      windowTarget.dispatchEvent(event("keydown", { code: "Digit3", repeat: false, target }));
+    }
+    expect(input.consumeAbilityPresses()).toEqual([]);
+  });
+
+  it("caps the queue and reset, blur, and dispose clear it", () => {
+    const { windowTarget, input } = setup();
+    for (let index = 0; index < 20; index += 1) {
+      windowTarget.dispatchEvent(event("keydown", { code: "Digit2", repeat: false }));
+    }
+    expect(input.consumeAbilityPresses()).toHaveLength(16);
+
+    windowTarget.dispatchEvent(event("keydown", { code: "Digit2", repeat: false }));
+    input.reset();
+    expect(input.consumeAbilityPresses()).toEqual([]);
+    windowTarget.dispatchEvent(event("keydown", { code: "Digit2", repeat: false }));
+    windowTarget.dispatchEvent(event("blur"));
+    expect(input.consumeAbilityPresses()).toEqual([]);
+    windowTarget.dispatchEvent(event("keydown", { code: "Digit2", repeat: false }));
+    input.dispose();
+    expect(input.consumeAbilityPresses()).toEqual([]);
+    windowTarget.dispatchEvent(event("keydown", { code: "Digit2", repeat: false }));
+    expect(input.consumeAbilityPresses()).toEqual([]);
+  });
+});
+
 describe("mouse and camera input lifecycle", () => {
   it("requests and releases pointer lock while keeping either button active", () => {
     const { canvas, documentTarget, windowTarget, input } = setup();

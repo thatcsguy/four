@@ -4,10 +4,16 @@ import {
   PROTOCOL_VERSION,
   decodeServerMessage,
   encodeClientMessage,
+  isAbilityOnGlobalCooldown,
   stepPlayer,
+  type AbilityResultMessage,
+  type AbilitySlot,
+  type AbilityUseMessage,
   type AuthoritativePlayerState,
+  type BossState,
   type InputMessage,
   type MovementInput,
+  type ProjectileState,
   type ServerMessage,
   type SnapshotMessage,
   type WelcomeMessage,
@@ -68,6 +74,13 @@ export interface PredictionClientOptions {
   readonly setTimeout?: (callback: () => void, milliseconds: number) => unknown;
   readonly clearTimeout?: (handle: unknown) => void;
   readonly onDiagnostics?: (diagnostics: PredictionDiagnostics) => void;
+  readonly onAbilityResult?: (result: AbilityResultMessage) => void;
+}
+
+export interface ClientCombatState {
+  readonly player: AuthoritativePlayerState["combat"] | undefined;
+  readonly boss: BossState | undefined;
+  readonly projectiles: readonly ProjectileState[];
 }
 
 interface PendingInput {
@@ -140,6 +153,11 @@ export class PredictionClient {
   private rttMs: number | undefined;
   private jitterMs: number | undefined;
   private lastMovementActive = false;
+  private boss: BossState | undefined;
+  private projectiles: readonly ProjectileState[] = [];
+  private nextAbilityRequestId = 1;
+  private readonly sentAbilityRequests = new Set<number>();
+  private readonly deliveredAbilityResults = new Set<number>();
 
   constructor(private readonly options: PredictionClientOptions) {
     this.now = options.now ?? (() => performance.now());
@@ -263,6 +281,61 @@ export class PredictionClient {
     return this.lastMovementActive;
   }
 
+  useAbility(slot: AbilitySlot): boolean {
+    if (
+      this.disposed
+      || !this.visible
+      || this.connection !== "connected"
+      || !this.playerId
+      || !this.epoch
+      || !this.predicted
+      || !this.transport
+      || this.transport.readyState !== OPEN_READY_STATE
+    ) {
+      return false;
+    }
+    if (this.nextAbilityRequestId > Number.MAX_SAFE_INTEGER) {
+      this.reconnect("Ability request range exhausted");
+      return false;
+    }
+    if (isAbilityOnGlobalCooldown(this.predicted.combat, slot, this.serverTick)) {
+      return false;
+    }
+
+    const request: AbilityUseMessage = {
+      type: "ability_use",
+      protocolVersion: PROTOCOL_VERSION,
+      epoch: this.epoch,
+      requestId: this.nextAbilityRequestId,
+      slot,
+    };
+    let encoded: string;
+    try {
+      encoded = encodeClientMessage(request);
+    } catch (error) {
+      this.reconnect(`Failed to encode ability command: ${String(error)}`);
+      return false;
+    }
+
+    this.sentAbilityRequests.add(request.requestId);
+    this.nextAbilityRequestId += 1;
+    try {
+      this.transport.send(encoded);
+    } catch (error) {
+      this.reconnect(`Failed to send ability command: ${String(error)}`);
+      return false;
+    }
+    return true;
+  }
+
+  combatState(): ClientCombatState {
+    return {
+      player: this.predicted?.combat === undefined ? undefined : structuredClone(this.predicted.combat),
+      boss: this.boss === undefined ? undefined : structuredClone(this.boss),
+      projectiles: this.projectiles.map((projectile) => structuredClone(projectile)),
+    };
+  }
+
   diagnostics(): PredictionDiagnostics {
     const oldest = this.pending[0];
     return {
@@ -341,6 +414,9 @@ export class PredictionClient {
       case "snapshot":
         this.acceptSnapshot(message);
         break;
+      case "ability_result":
+        this.acceptAbilityResult(message);
+        break;
       case "pong":
         this.acceptPong(message.nonce);
         break;
@@ -367,6 +443,8 @@ export class PredictionClient {
     this.predicted = copyState(local);
     this.rendered = copyState(local);
     this.latestPlayers = message.baseline.players.map(copyState);
+    this.boss = structuredClone(message.baseline.boss);
+    this.projectiles = message.baseline.projectiles.map((projectile) => structuredClone(projectile));
     this.remotePlayers.acceptBaseline(
       message.epoch,
       message.playerId,
@@ -380,6 +458,7 @@ export class PredictionClient {
     this.lastAcknowledgedSequence = local.lastProcessedInputSequence;
     this.nextSequence = local.lastProcessedInputSequence + 1;
     this.clientTick = message.initialServerTick;
+    this.nextAbilityRequestId = 1;
     this.pending = [];
     this.accumulatorMs = 0;
     this.lastAdvanceMs = this.now();
@@ -406,6 +485,8 @@ export class PredictionClient {
     this.lastSnapshotSequence = message.snapshotSequence;
     this.serverTick = message.serverTick;
     this.latestPlayers = message.players.map(copyState);
+    this.boss = structuredClone(message.boss);
+    this.projectiles = message.projectiles.map((projectile) => structuredClone(projectile));
     this.remotePlayers.acceptSnapshot(
       message.epoch,
       message.snapshotSequence,
@@ -444,6 +525,29 @@ export class PredictionClient {
     this.applyVisualCorrection(correction);
     this.recordCorrection(correction);
     this.emitDiagnostics();
+  }
+
+  private acceptAbilityResult(message: AbilityResultMessage): void {
+    if (!this.epoch || message.epoch !== this.epoch) return;
+    if (this.deliveredAbilityResults.has(message.requestId)) return;
+    if (message.requestId >= this.nextAbilityRequestId) {
+      this.reconnect("Received an impossible future ability result");
+      return;
+    }
+    if (!this.sentAbilityRequests.has(message.requestId)) return;
+    if (!this.playerId || !this.predicted || !this.rendered) {
+      this.reconnect("Ability result arrived without initialized local state");
+      return;
+    }
+
+    const combat = structuredClone(message.combat);
+    this.predicted = { ...this.predicted, combat: structuredClone(combat) };
+    this.rendered = { ...this.rendered, combat: structuredClone(combat) };
+    this.latestPlayers = this.latestPlayers.map((player) => player.playerId === this.playerId
+      ? { ...player, combat: structuredClone(combat) }
+      : player);
+    this.deliveredAbilityResults.add(message.requestId);
+    this.options.onAbilityResult?.(structuredClone(message));
   }
 
   private produceCommand(nowMs: number): boolean {
@@ -611,6 +715,11 @@ export class PredictionClient {
     this.maxCorrectionMeters = 0;
     this.correctionCount = 0;
     this.lastMovementActive = false;
+    this.boss = undefined;
+    this.projectiles = [];
+    this.nextAbilityRequestId = 1;
+    this.sentAbilityRequests.clear();
+    this.deliveredAbilityResults.clear();
   }
 
   private fail(detail: string): void {

@@ -1,14 +1,14 @@
 # Four
 
-Four is a first-playable browser multiplayer movement demo. Up to four clients automatically join one authoritative Node.js arena, predict their own movement immediately, and interpolate the other players. This milestone intentionally contains no combat, raid, account, persistence, or general-purpose physics systems.
+Four is a first-playable browser multiplayer combat demo. Up to four clients automatically join one authoritative Node.js arena, predict their own movement immediately, interpolate the other players, and fight the shared boss Gloop as Dancers.
 
 ## Architecture
 
-- `packages/shared`: versioned Zod wire schemas, constants, and the pure deterministic 60 Hz movement step used by client prediction and server authority.
-- `apps/server`: Node HTTP/WebSocket process, four-player capacity, fixed-step simulation, validation/rate limits, 20 Hz snapshots, and production static serving.
-- `apps/client`: Vite/Three.js presentation, keyboard/mouse/gamepad input, fixed-rate prediction and reconciliation, remote interpolation, lifecycle cleanup, and diagnostics.
+- `packages/shared`: versioned Zod wire schemas, class/ability definitions, combat constants, and pure deterministic movement and combat rules shared by tests and authority boundaries.
+- `apps/server`: Node HTTP/WebSocket process, four-player capacity, fixed-step movement and projectile simulation, authoritative buffs/procs/damage, validation/rate limits, 20 Hz snapshots, and production static serving.
+- `apps/client`: Vite/Three.js presentation, keyboard/mouse/gamepad input, fixed-rate movement prediction and reconciliation, remote interpolation, authoritative combat presentation, lifecycle cleanup, and diagnostics.
 
-Clients send normalized world-space XZ intent plus held jump intent; they never send transforms. The server owns player membership and canonical movement state. Camera and animation state remain presentation-only.
+Clients send normalized world-space XZ intent plus held jump intent; they never send transforms. Ability presses are ordered requests, not predicted outcomes. The server owns player membership, canonical movement, class assignment, readiness buffs, proc rolls, homing projectiles, boss health, and damage. Camera, animation, and projectile extrapolation remain presentation-only.
 
 ## Setup and commands
 
@@ -53,12 +53,15 @@ PowerShell uses `$env:NODE_ENV="production"; npm start`. Open `http://localhost:
 |---|---|---|
 | Move | W/A/S/D, camera-yaw relative | Left stick |
 | Jump | Space, held | Top face button |
+| Abilities | 1–4 | — |
 | Orbit | Hold either primary mouse button and move | Right stick |
 | Move forward | Hold both primary mouse buttons | Left stick forward |
 | Zoom | Wheel, fixed 1.5 m steps | Hold left bumper + right stick vertical |
 | Diagnostics | Backquote toggles the overlay | — |
 
 Both sticks use a `0.1` deadzone. Movement sources combine before normalization, so diagonals and cardinal movement have equal speed. Pointer lock is requested while either primary mouse button is held and released after both are released; losing pointer lock or window focus clears held mouse input.
+
+All players currently default to the Dancer class; class selection is future work. Slot 2 is always available and guarantees the readiness buff for slot 3, while independently having a 50% chance to ready slot 1. Slot 3 consumes its readiness buff and has a 50% chance to ready slot 4. Slots 1 and 4 consume their readiness buffs and deal 25 damage instead of the 10 damage dealt by slots 2 and 3. Readiness does not expire or stack. All four abilities share a server-authoritative 2.5-second global cooldown, shown as a countdown on the hotbar. Number keys trigger on fresh key-down edges, so holding one does not repeat the ability.
 
 ## Diagnostics and network-condition controls
 
@@ -89,7 +92,9 @@ Remote interpolation remains `100 ms`; local visual corrections ignore errors at
 ## Milestone limitations
 
 - One in-memory arena only; refresh/reconnect creates a new identity and epoch.
-- No authentication, persistence, matchmaking, deployment-platform configuration, combat, abilities, raids, art pipeline, audio, touch/mobile controls, or remapping UI.
+- All players currently default to Dancer; class selection and additional classes are future work.
+- No per-ability cooldowns, off-global-cooldown abilities, enemy attacks, boss reset/respawn, persistence, audio, or final combat art yet.
+- No authentication, matchmaking, deployment-platform configuration, raids, art pipeline, touch/mobile controls, or remapping UI.
 - Flat circular arena only; there is no scenery collision or camera obstruction beyond ground-floor protection.
 - Full JSON snapshots are intentionally used for this four-player milestone.
 - Physical gamepad behavior depends on the browser's standard mapping and should be checked on target hardware; automated tests cover the standard mapping, deadzones, disconnect neutralization, orbit, zoom modifier, and jump button.
