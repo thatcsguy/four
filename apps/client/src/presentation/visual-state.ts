@@ -1,3 +1,5 @@
+import type { PlayerClassId } from "@four/shared";
+
 export const PLAYER_COLOR_PALETTE = [
   0x2dd4bf,
   0xfb7185,
@@ -21,6 +23,7 @@ export interface PlayerRenderState {
   readonly grounded: boolean;
   readonly moving: boolean;
   readonly isLocal: boolean;
+  readonly classId: PlayerClassId;
 }
 
 export function hashPlayerId(id: string): number {

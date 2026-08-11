@@ -67,10 +67,10 @@ if (root) {
 
   if (fixture === "players") {
     const samples: readonly PlayerRenderState[] = [
-      { id: "local", name: "Nova", health: 100, maxHealth: 100, position: { x: -4, y: 0, z: 3 }, facing: 0, grounded: true, moving: true, isLocal: true },
-      { id: "remote-a", name: "Moss", health: 82, maxHealth: 100, position: { x: 0, y: 0, z: 5 }, facing: Math.PI / 2, grounded: true, moving: true, isLocal: false },
-      { id: "remote-b", name: "Pip", health: 46, maxHealth: 100, position: { x: 4, y: 1.6, z: 3 }, facing: Math.PI, grounded: false, moving: false, isLocal: false },
-      { id: "remote-c", name: "Rune", health: 25, maxHealth: 100, position: { x: 0, y: 0, z: -5 }, facing: -Math.PI / 2, grounded: true, moving: false, isLocal: false },
+      { id: "local", name: "Nova", health: 100, maxHealth: 100, position: { x: -4, y: 0, z: 3 }, facing: 0, grounded: true, moving: true, isLocal: true, classId: "samurai" },
+      { id: "remote-a", name: "Moss", health: 82, maxHealth: 100, position: { x: 0, y: 0, z: 5 }, facing: Math.PI / 2, grounded: true, moving: true, isLocal: false, classId: "dancer" },
+      { id: "remote-b", name: "Pip", health: 46, maxHealth: 100, position: { x: 4, y: 1.6, z: 3 }, facing: Math.PI, grounded: false, moving: false, isLocal: false, classId: "dancer" },
+      { id: "remote-c", name: "Rune", health: 25, maxHealth: 100, position: { x: 0, y: 0, z: -5 }, facing: -Math.PI / 2, grounded: true, moving: false, isLocal: false, classId: "dancer" },
     ];
     for (const sample of samples) {
       view.upsertPlayer(sample);
@@ -103,6 +103,7 @@ if (root) {
         grounded: player.grounded,
         moving: renderIntent.moveX !== 0 || renderIntent.moveZ !== 0,
         isLocal: true,
+        classId: "samurai",
       });
       camera.update(followedFeet, input.consumeCameraInput(), deltaSeconds);
     });
@@ -150,6 +151,11 @@ if (root) {
           },
         });
       },
+      onAbilityResult: (result) => {
+        if (result.accepted && result.combat.classId === "samurai" && result.slot <= 3) {
+          view.playLocalAttack();
+        }
+      },
     });
     network.connect();
     const onVisibilityChange = (): void => network?.setVisible(!document.hidden);
@@ -190,6 +196,7 @@ if (root) {
           grounded: rendered.grounded,
           moving: activeNetwork.movementActive(),
           isLocal: true,
+          classId: rendered.combat.classId,
         });
       }
 
@@ -206,6 +213,7 @@ if (root) {
           grounded: remote.state.grounded,
           moving: remote.moving,
           isLocal: false,
+          classId: remote.state.combat.classId,
         });
       }
       for (const id of remoteIds) {

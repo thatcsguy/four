@@ -33,6 +33,7 @@ export type RenderFrameListener = (frame: RenderFrame) => void;
 export interface SceneRenderer {
   readonly camera: THREE.PerspectiveCamera;
   upsertPlayer(state: PlayerRenderState): void;
+  playLocalAttack(): void;
   removePlayer(id: string): void;
   clearPlayers(): void;
   setBossState(boss: Readonly<BossState>): void;
@@ -104,6 +105,7 @@ export function createSceneRenderer(root: HTMLElement): SceneRenderer {
   scene.add(sun);
 
   const players = new Map<string, CharacterVisual>();
+  let localPlayerId: string | undefined;
   const colorIndices = new Map<string, number>();
   const frameListeners = new Set<RenderFrameListener>();
   const clock = new THREE.Clock();
@@ -191,6 +193,10 @@ export function createSceneRenderer(root: HTMLElement): SceneRenderer {
         scene.add(visual.root);
       }
       visual.setState(state);
+      if (state.isLocal) localPlayerId = state.id;
+    },
+    playLocalAttack(): void {
+      if (localPlayerId !== undefined) players.get(localPlayerId)?.playAttack();
     },
     removePlayer(id): void {
       const visual = players.get(id);
@@ -201,6 +207,7 @@ export function createSceneRenderer(root: HTMLElement): SceneRenderer {
       visual.dispose();
       players.delete(id);
       colorIndices.delete(id);
+      if (localPlayerId === id) localPlayerId = undefined;
     },
     clearPlayers(): void {
       for (const [id, visual] of players) {
@@ -209,6 +216,7 @@ export function createSceneRenderer(root: HTMLElement): SceneRenderer {
         players.delete(id);
       }
       colorIndices.clear();
+      localPlayerId = undefined;
     },
     setBossState(state): void {
       boss.setState(state);
