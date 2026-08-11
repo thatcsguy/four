@@ -321,6 +321,28 @@ describe("authoritative combat networking", () => {
     client.dispose();
   });
 
+  it("sends inputs only during the final 500 ms of global cooldown", () => {
+    const { client, transport } = setup();
+    const player = client.predictedState()!;
+    const cooldownPlayer: AuthoritativePlayerState = {
+      ...player,
+      combat: { classId: "dancer", buffs: [], globalCooldownEndsAtTick: 96 },
+    };
+
+    transport.receive(snapshot(cooldownPlayer, 5));
+    expect(client.useAbility(2)).toBe(false);
+    expect(sentAbilities(transport)).toEqual([]);
+
+    transport.receive(snapshot(cooldownPlayer, 6));
+    expect(client.useAbility(2)).toBe(true);
+    expect(client.useAbility(3)).toBe(true);
+    expect(sentAbilities(transport).map(({ requestId, slot }) => ({ requestId, slot }))).toEqual([
+      { requestId: 1, slot: 2 },
+      { requestId: 2, slot: 3 },
+    ]);
+    client.dispose();
+  });
+
   it("sends a class change and accepts the authoritative class state", () => {
     const { client, transport } = setup();
     expect(client.changeClass("samurai")).toBe(true);

@@ -1,6 +1,7 @@
 import { once } from "node:events";
 
 import {
+  ABILITY_QUEUE_WINDOW_TICKS,
   FIXED_DELTA_SECONDS,
   MAX_ACTIVE_PLAYERS,
   PROTOCOL_VERSION,
@@ -500,6 +501,51 @@ describe("authoritative WebSocket server", () => {
     pumpTicks(1);
     await expect(client.next((message) => message.type === "ability_result" && message.requestId === 3))
       .resolves.toMatchObject({ accepted: true, reason: "accepted" });
+  });
+
+  it("holds and replaces actions during the final 500 ms, then executes on the expiry tick", async () => {
+    randomRolls.push(0.25, 0.75);
+    const client = await connect();
+    const baseline = await welcome(client);
+
+    client.socket.send(encodeClientMessage(ability(baseline, 1, 2)));
+    await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+    pumpTicks(1);
+    const opening = await client.next((message): message is AbilityResultMessage =>
+      message.type === "ability_result" && message.requestId === 1);
+    expect(opening.accepted).toBe(true);
+
+    pumpTicks(DANCER_GLOBAL_COOLDOWN_TICKS - ABILITY_QUEUE_WINDOW_TICKS - 2);
+    client.socket.send(encodeClientMessage(ability(baseline, 2, 3)));
+    await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+    pumpTicks(1);
+    await expect(client.next((message) => message.type === "ability_result" && message.requestId === 2))
+      .resolves.toMatchObject({ accepted: false, reason: "global_cooldown" });
+    expect(randomRolls).toEqual([0.75]);
+
+    client.socket.send(encodeClientMessage(ability(baseline, 3, 3)));
+    await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 1);
+    pumpTicks(1);
+    expect(server.diagnostics().abilityQueueLengths[0]).toBe(1);
+    expect(client.messages.some((message) => message.type === "ability_result" && message.requestId === 3)).toBe(false);
+    expect(randomRolls).toEqual([0.75]);
+
+    client.socket.send(encodeClientMessage(ability(baseline, 4, 2)));
+    await waitFor(() => server.diagnostics().abilityQueueLengths[0] === 2);
+    pumpTicks(1);
+    await expect(client.next((message) => message.type === "ability_result" && message.requestId === 3))
+      .resolves.toMatchObject({ accepted: false, reason: "invalid_request" });
+    expect(server.diagnostics().abilityQueueLengths[0]).toBe(1);
+    expect(randomRolls).toEqual([0.75]);
+
+    pumpTicks(ABILITY_QUEUE_WINDOW_TICKS - 2);
+    expect(client.messages.some((message) => message.type === "ability_result" && message.requestId === 4)).toBe(false);
+    pumpTicks(1);
+    const queued = await client.next((message): message is AbilityResultMessage =>
+      message.type === "ability_result" && message.requestId === 4);
+    expect(queued).toMatchObject({ accepted: true, reason: "accepted", slot: 2 });
+    expect(server.diagnostics().abilityQueueLengths[0]).toBe(0);
+    expect(randomRolls).toEqual([]);
   });
 
   it("spawns owned projectiles, converges snapshots, and damages Gloop once", async () => {

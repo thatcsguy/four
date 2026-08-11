@@ -40,9 +40,7 @@ if (root) {
   const disconnectedCombat = createInitialCombatState();
   let lastConnection: ConnectionState = "idle";
   const requestAbility = (slot: AbilitySlot): void => {
-    if (network?.useAbility(slot) !== true) {
-      hotbar.showFeedback(slot, false);
-    }
+    network?.useAbility(slot);
   };
   const hotbar = new AbilityHotbar({
     state: { combat: disconnectedCombat, connected: false, bossAlive: false, serverTick: 0 },
@@ -123,7 +121,6 @@ if (root) {
         ? (url) => withNetworkConditions(createBrowserTransport(url), networkConditions)
         : createBrowserTransport,
       sampleIntent: () => input.sampleMovement(camera.yaw),
-      onAbilityResult: (result) => hotbar.showFeedback(result.slot, result.accepted),
       onDiagnostics: (diagnostics) => {
         diagnosticsOverlay.update(diagnostics);
         if (diagnostics.connection !== "connected" && lastConnection === "connected") {

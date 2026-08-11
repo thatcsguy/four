@@ -1,3 +1,4 @@
+import { ABILITY_QUEUE_WINDOW_TICKS } from "./constants.js";
 import { PLAYER_CLASSES } from "./player-classes/registry.js";
 import type {
   AbilityDefinition,
@@ -34,6 +35,18 @@ export function isAbilityOnGlobalCooldown(
   const ability = getAbilityForSlot(combatState.classId, slot);
   return ability?.globalCooldownTicks !== undefined
     && globalCooldownRemainingTicks(combatState, currentTick) > 0;
+}
+
+export function isAbilityInGlobalCooldownQueueWindow(
+  combatState: Readonly<Pick<PlayerCombatState, "classId" | "globalCooldownEndsAtTick">>,
+  slot: AbilitySlot,
+  currentTick: number,
+): boolean {
+  const ability = getAbilityForSlot(combatState.classId, slot);
+  const remainingTicks = globalCooldownRemainingTicks(combatState, currentTick);
+  return ability?.globalCooldownTicks !== undefined
+    && remainingTicks > 0
+    && remainingTicks <= ABILITY_QUEUE_WINDOW_TICKS;
 }
 
 export function isAbilitySlotUsable(

@@ -1,8 +1,8 @@
 import {
   ABILITY_SLOTS,
-  SIMULATION_HZ,
   getAbilityForSlot,
   globalCooldownRemainingTicks,
+  isAbilityInGlobalCooldownQueueWindow,
   isAbilitySlotUsable,
   type AbilitySlot,
   type PlayerCombatState,
@@ -19,34 +19,26 @@ export interface AbilityHotbarOptions {
   readonly state: AbilityHotbarState;
   readonly onUse: (slot: AbilitySlot) => void;
   readonly documentTarget?: Pick<Document, "createElement">;
-  readonly feedbackDurationMs?: number;
 }
 
 interface SlotElements {
   readonly slot: AbilitySlot;
   readonly button: HTMLButtonElement;
   readonly key: HTMLElement;
-  readonly name: HTMLElement;
-  readonly damage: HTMLElement;
-  readonly reason: HTMLElement;
   readonly onClick: () => void;
+  lastCooldownTicks: number;
 }
-
-const DEFAULT_FEEDBACK_DURATION_MS = 450;
 
 export class AbilityHotbar {
   readonly root: HTMLElement;
 
   private state: AbilityHotbarState;
   private readonly slots: SlotElements[] = [];
-  private readonly feedbackTimers = new Map<AbilitySlot, ReturnType<typeof setTimeout>>();
-  private readonly feedbackDurationMs: number;
   private disposed = false;
 
   constructor(private readonly options: AbilityHotbarOptions) {
     const documentTarget = options.documentTarget ?? document;
     this.state = options.state;
-    this.feedbackDurationMs = options.feedbackDurationMs ?? DEFAULT_FEEDBACK_DURATION_MS;
     this.root = documentTarget.createElement("nav");
     this.root.className = "ability-hotbar";
     this.root.setAttribute("aria-label", "Abilities");
@@ -59,14 +51,11 @@ export class AbilityHotbar {
 
       const key = documentTarget.createElement("kbd");
       key.className = "ability-hotbar__key";
-      const name = documentTarget.createElement("span");
-      name.className = "ability-hotbar__name";
-      const damage = documentTarget.createElement("span");
-      damage.className = "ability-hotbar__damage";
-      const reason = documentTarget.createElement("span");
-      reason.className = "ability-hotbar__reason";
+      const cooldownOverlay = documentTarget.createElement("span");
+      cooldownOverlay.className = "ability-hotbar__cooldown";
+      cooldownOverlay.setAttribute("aria-hidden", "true");
 
-      button.append(key, name, damage, reason);
+      button.append(key, cooldownOverlay);
       const onClick = (): void => {
         if (!this.disposed && !button.disabled) {
           this.options.onUse(slot);
@@ -74,7 +63,7 @@ export class AbilityHotbar {
       };
       button.addEventListener("click", onClick);
       this.root.append(button);
-      this.slots.push({ slot, button, key, name, damage, reason, onClick });
+      this.slots.push({ slot, button, key, onClick, lastCooldownTicks: 0 });
     }
     this.render();
   }
@@ -87,38 +76,13 @@ export class AbilityHotbar {
     this.render();
   }
 
-  showFeedback(slot: AbilitySlot, accepted: boolean): void {
-    if (this.disposed) {
-      return;
-    }
-    const elements = this.slots.find((candidate) => candidate.slot === slot);
-    if (elements === undefined) {
-      return;
-    }
-    const priorTimer = this.feedbackTimers.get(slot);
-    if (priorTimer !== undefined) {
-      clearTimeout(priorTimer);
-    }
-    elements.button.dataset.feedback = accepted ? "accepted" : "rejected";
-    const timer = setTimeout(() => {
-      delete elements.button.dataset.feedback;
-      this.feedbackTimers.delete(slot);
-    }, this.feedbackDurationMs);
-    this.feedbackTimers.set(slot, timer);
-  }
-
   dispose(): void {
     if (this.disposed) {
       return;
     }
     this.disposed = true;
-    for (const timer of this.feedbackTimers.values()) {
-      clearTimeout(timer);
-    }
-    this.feedbackTimers.clear();
     for (const elements of this.slots) {
       elements.button.removeEventListener("click", elements.onClick);
-      delete elements.button.dataset.feedback;
     }
   }
 
@@ -130,13 +94,25 @@ export class AbilityHotbar {
         ? 0
         : globalCooldownRemainingTicks(this.state.combat, this.state.serverTick);
       const onGlobalCooldown = cooldownTicks > 0;
-      const enabled = this.state.connected && this.state.bossAlive && combatUsable && !onGlobalCooldown;
+      const cooldownRestarted = cooldownTicks > elements.lastCooldownTicks;
+      const queueWindowOpen = isAbilityInGlobalCooldownQueueWindow(
+        this.state.combat,
+        elements.slot,
+        this.state.serverTick,
+      );
+      const cooldownRemaining = ability?.globalCooldownTicks === undefined
+        ? 0
+        : Math.min(1, cooldownTicks / ability.globalCooldownTicks);
+      const enabled = this.state.connected
+        && this.state.bossAlive
+        && combatUsable
+        && (!onGlobalCooldown || queueWindowOpen);
       const reason = !this.state.connected
         ? "Disconnected"
         : !this.state.bossAlive
           ? "Boss defeated"
           : onGlobalCooldown
-            ? `GCD ${Math.max(0.1, cooldownTicks / SIMULATION_HZ).toFixed(1)}s`
+            ? "Global cooldown"
           : !combatUsable
             ? this.state.combat.classId === "samurai" && elements.slot === 4
               ? "Requires 3 stamps"
@@ -158,19 +134,19 @@ export class AbilityHotbar {
       const comboNeeded = comboStarted && elements.slot <= 3 && !comboStepComplete;
 
       elements.key.textContent = String(elements.slot);
-      elements.name.textContent = ability?.name ?? `Ability ${elements.slot}`;
-      elements.damage.textContent = ability === undefined ? "" : `${ability.damage} damage`;
-      elements.reason.textContent = reason;
       elements.button.disabled = !enabled;
+      elements.button.style.setProperty("--gcd-remaining", `${cooldownRemaining * 360}deg`);
       elements.button.dataset.procReady = String(procReady);
       elements.button.dataset.stamp = showsStamp ? (stampEarned ? "earned" : "missing") : "hidden";
       elements.button.dataset.comboNeeded = String(comboNeeded);
       elements.button.dataset.globalCooldown = String(onGlobalCooldown);
+      elements.button.dataset.cooldownRestarted = String(cooldownRestarted);
       elements.button.dataset.state = enabled ? "enabled" : "locked";
       elements.button.setAttribute(
         "aria-label",
         `${elements.slot}: ${ability?.name ?? "Unknown ability"}${ability === undefined ? "" : `, ${ability.damage} damage`}${comboNeeded ? ", needed to complete combo" : ""}${reason === "" ? "" : `, ${reason}`}`,
       );
+      elements.lastCooldownTicks = cooldownTicks;
     }
   }
 }

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   addReadinessBuff,
+  ABILITY_QUEUE_WINDOW_SECONDS,
+  ABILITY_QUEUE_WINDOW_TICKS,
   COMBAT_CONSTANTS,
   createInitialCombatState,
   DANCER_ABILITIES,
@@ -11,6 +13,7 @@ import {
   getAbilityForSlot,
   globalCooldownRemainingTicks,
   isAbilityOnGlobalCooldown,
+  isAbilityInGlobalCooldownQueueWindow,
   isAbilitySlotUsable,
   resolveAbilityUse,
   type AbilitySlot,
@@ -31,6 +34,8 @@ describe("combat content", () => {
     ]);
     expect(DANCER_GLOBAL_COOLDOWN_SECONDS).toBe(2.5);
     expect(DANCER_GLOBAL_COOLDOWN_TICKS).toBe(150);
+    expect(ABILITY_QUEUE_WINDOW_SECONDS).toBe(0.5);
+    expect(ABILITY_QUEUE_WINDOW_TICKS).toBe(30);
     expect(GLOOP_BOSS).toMatchObject({
       id: "gloop",
       maxHealth: 50_000,
@@ -168,5 +173,17 @@ describe("ability resolution", () => {
     });
     expect(isAbilityOnGlobalCooldown(first.combatState, 3, 190)).toBe(false);
     expect(resolveAbilityUse(first.combatState, 3, 0, 190)).toMatchObject({ accepted: true });
+  });
+
+  it("opens the global-cooldown action queue for only the final 500 milliseconds", () => {
+    const state: PlayerCombatState = {
+      classId: "dancer",
+      buffs: [],
+      globalCooldownEndsAtTick: 100,
+    };
+    expect(isAbilityInGlobalCooldownQueueWindow(state, 2, 69)).toBe(false);
+    expect(isAbilityInGlobalCooldownQueueWindow(state, 2, 70)).toBe(true);
+    expect(isAbilityInGlobalCooldownQueueWindow(state, 2, 99)).toBe(true);
+    expect(isAbilityInGlobalCooldownQueueWindow(state, 2, 100)).toBe(false);
   });
 });

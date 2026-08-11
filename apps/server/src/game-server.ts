@@ -14,6 +14,7 @@ import {
   createInitialCombatState,
   decodeClientMessage,
   encodeServerMessage,
+  isAbilityInGlobalCooldownQueueWindow,
   isAbilityOnGlobalCooldown,
   resolveAbilityUse,
   stepPlayer,
@@ -81,6 +82,7 @@ interface PlayerConnection {
   state: AuthoritativePlayerState;
   inputQueue: InputMessage[];
   abilityQueue: AbilityUseMessage[];
+  queuedAbility: AbilityUseMessage | undefined;
   lastAbilityRequestId: number;
   lastReceivedSequence: number;
   lastAppliedInput: MovementInput;
@@ -205,7 +207,9 @@ export class GameServer {
       snapshotSequence: this.snapshotSequence,
       activePlayers: this.players.size,
       queueLengths: [...this.players.values()].map((player) => player.inputQueue.length),
-      abilityQueueLengths: [...this.players.values()].map((player) => player.abilityQueue.length),
+      abilityQueueLengths: [...this.players.values()].map(
+        (player) => player.abilityQueue.length + (player.queuedAbility === undefined ? 0 : 1),
+      ),
       bossHealth: this.boss.health,
       activeProjectiles: this.projectiles.size,
       lastPumpSteps: this.lastPumpSteps,
@@ -280,6 +284,7 @@ export class GameServer {
       state: createInitialPlayerState({ playerId, displayName, position: spawn }),
       inputQueue: [],
       abilityQueue: [],
+      queuedAbility: undefined,
       lastAbilityRequestId: 0,
       lastReceivedSequence: 0,
       lastAppliedInput: NEUTRAL_INPUT,
@@ -383,6 +388,7 @@ export class GameServer {
       stateRevision: player.state.stateRevision + 1,
     };
     player.abilityQueue = [];
+    player.queuedAbility = undefined;
     this.send(player.socket, {
       type: "class_change_result",
       protocolVersion: PROTOCOL_VERSION,
@@ -437,6 +443,15 @@ export class GameServer {
   private simulateStep(): void {
     this.serverTick += 1;
     for (const player of this.players.values()) {
+      const queuedAbility = player.queuedAbility;
+      if (queuedAbility !== undefined && !isAbilityOnGlobalCooldown(
+        toCombatState(player.state.combat),
+        queuedAbility.slot,
+        this.serverTick,
+      )) {
+        player.queuedAbility = undefined;
+        this.processAbilityRequest(player, queuedAbility, false);
+      }
       const ability = player.abilityQueue.shift();
       if (ability !== undefined) this.processAbilityRequest(player, ability);
     }
@@ -478,13 +493,24 @@ export class GameServer {
     }
   }
 
-  private processAbilityRequest(player: PlayerConnection, request: AbilityUseMessage): void {
+  private processAbilityRequest(
+    player: PlayerConnection,
+    request: AbilityUseMessage,
+    allowQueue = true,
+  ): void {
     if (this.boss.health <= 0) {
       this.sendAbilityResult(player, request, false, "boss_defeated");
       return;
     }
     const combatState = toCombatState(player.state.combat);
     if (isAbilityOnGlobalCooldown(combatState, request.slot, this.serverTick)) {
+      if (allowQueue && isAbilityInGlobalCooldownQueueWindow(combatState, request.slot, this.serverTick)) {
+        if (player.queuedAbility !== undefined) {
+          this.sendAbilityResult(player, player.queuedAbility, false, "invalid_request");
+        }
+        player.queuedAbility = request;
+        return;
+      }
       this.sendAbilityResult(player, request, false, "global_cooldown");
       return;
     }
@@ -634,6 +660,7 @@ export class GameServer {
     }
     player.inputQueue.length = 0;
     player.abilityQueue.length = 0;
+    player.queuedAbility = undefined;
     this.occupiedSpawns.delete(player.spawnIndex);
     this.options.logger.info(`disconnected player=${player.playerId} epoch=${player.epoch}`);
   }

@@ -4,6 +4,7 @@ import {
   PROTOCOL_VERSION,
   decodeServerMessage,
   encodeClientMessage,
+  isAbilityInGlobalCooldownQueueWindow,
   isAbilityOnGlobalCooldown,
   stepPlayer,
   type AbilityResultMessage,
@@ -300,7 +301,9 @@ export class PredictionClient {
       this.reconnect("Ability request range exhausted");
       return false;
     }
-    if (isAbilityOnGlobalCooldown(this.predicted.combat, slot, this.serverTick)) {
+    const onGlobalCooldown = isAbilityOnGlobalCooldown(this.predicted.combat, slot, this.serverTick);
+    if (onGlobalCooldown
+      && !isAbilityInGlobalCooldownQueueWindow(this.predicted.combat, slot, this.serverTick)) {
       return false;
     }
 
